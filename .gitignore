@@ -1,0 +1,38 @@
+# Project exclude paths
+/.dart_tool/
+/build/
+
+# Miscellaneous
+*.class
+*.log
+*.pyc
+*.swp
+.DS_Store
+.atom/
+.buildlog/
+.history
+.svn/
+.swiftpm/
+
+# IntelliJ / Android Studio
+*.iml
+*.ipr
+*.iws
+.idea/
+/android/app/debug
+/android/app/profile
+/android/app/release
+
+# Flutter/Dart
+.dart_tool/
+.flutter-plugins
+.flutter-plugins-dependencies
+.pub-cache/
+.pub/
+/build/
+
+# CRITICAL ANDROID FILES TO IGNORE
+local.properties
+.gradle/
+captures/
+node_modules/
