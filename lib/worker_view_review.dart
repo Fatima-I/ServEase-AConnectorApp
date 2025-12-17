@@ -1,8 +1,12 @@
 import 'package:flutter/material.dart';
-import 'worker_profile.dart';
-import 'user_worker_chat_screen.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:firebase_auth/firebase_auth.dart';
+// Note: Imports for bottom nav or profile are optional here depending on if you want navigation
+// For "My Reviews", usually it's just a back button to the Drawer/Home.
 
 class WorkerViewScreen extends StatefulWidget {
+  // We might not need all these passed in if we are just fetching for "current user"
+  // but keeping them to match your existing navigation structure.
   final String username;
   final String name;
   final String profession;
@@ -27,162 +31,125 @@ class WorkerViewScreen extends StatefulWidget {
   });
 
   @override
-  State<WorkerViewScreen> createState() => _WorkerReviewsScreenState();
+  State<WorkerViewScreen> createState() => _WorkerViewScreenState();
 }
 
-class _WorkerReviewsScreenState extends State<WorkerViewScreen> {
+class _WorkerViewScreenState extends State<WorkerViewScreen> {
   static const Color lightSeaGreen = Color(0xFF20B2AA);
-
-  final TextEditingController _reviewController = TextEditingController();
-  final List<String> _reviews = [
-    "Excellent worker! Very punctual and skilled.",
-    "Good experience, polite and efficient.",
-    "Average work, could improve communication.",
-  ];
-  int _selectedIndex = 2;
-
-  final bool isWorker = true;
-
-  @override
-  void dispose() {
-    _reviewController.dispose();
-    super.dispose();
-  }
-
-  void _addReview() {
-    final text = _reviewController.text.trim();
-    if (text.isEmpty) return;
-    setState(() {
-      _reviews.insert(0, text);
-      _reviewController.clear();
-    });
-  }
+  final FirebaseAuth _auth = FirebaseAuth.instance;
+  final FirebaseFirestore _firestore = FirebaseFirestore.instance;
 
   @override
   Widget build(BuildContext context) {
+    final myUid = _auth.currentUser?.uid;
+
+    if (myUid == null) {
+      return const Scaffold(body: Center(child: Text("Please login first")));
+    }
+
     return Scaffold(
       appBar: AppBar(
-        title: const Text("Worker Reviews"),
+        title: const Text("My Reviews"),
         backgroundColor: lightSeaGreen,
+        leading: IconButton(
+          icon: const Icon(Icons.arrow_back, color: Colors.white),
+          onPressed: () => Navigator.pop(context),
+        ),
       ),
       body: Padding(
         padding: const EdgeInsets.all(12.0),
         child: Column(
           children: [
-            // ✅ Worker cannot write reviews, hide text field
-            if (!isWorker)
-              Row(
-                children: [
-                  Expanded(
-                    child: TextField(
-                      controller: _reviewController,
-                      decoration: InputDecoration(
-                        hintText: "Write a review...",
-                        border: OutlineInputBorder(
-                          borderRadius: BorderRadius.circular(12),
-                        ),
-                        contentPadding: const EdgeInsets.symmetric(
-                            vertical: 10, horizontal: 15),
-                      ),
-                      onSubmitted: (_) => _addReview(),
+            // Header Stats (Optional)
+            Card(
+              elevation: 2,
+              child: Padding(
+                padding: const EdgeInsets.all(16.0),
+                child: Row(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    const Icon(Icons.star, color: Colors.amber, size: 30),
+                    const SizedBox(width: 10),
+                    Text(
+                      "${widget.rating} Rating",
+                      style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
                     ),
-                  ),
-                  const SizedBox(width: 8),
-                  ElevatedButton(
-                    onPressed: _addReview,
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: lightSeaGreen,
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(12),
-                      ),
+                    const SizedBox(width: 20),
+                    Text(
+                      "(${widget.reviews} Reviews)",
+                      style: const TextStyle(fontSize: 16, color: Colors.grey),
                     ),
-                    child: const Text("Enter"),
-                  ),
-                ],
-              ),
-
-            if (!isWorker) const SizedBox(height: 15),
-
-            Expanded(
-              child: _reviews.isEmpty
-                  ? const Center(
-                child: Text(
-                  "No reviews yet. Be the first to write one!",
-                  style: TextStyle(color: Colors.grey),
+                  ],
                 ),
-              )
-                  : ListView.builder(
-                itemCount: _reviews.length,
-                itemBuilder: (context, index) {
-                  return Card(
-                    margin: const EdgeInsets.symmetric(vertical: 6),
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(12),
-                    ),
-                    elevation: 3,
-                    child: ListTile(
-                      leading: CircleAvatar(
-                        backgroundColor:
-                        lightSeaGreen.withOpacity(0.2),
-                        child: const Icon(Icons.person,
-                            color: Colors.black54),
+              ),
+            ),
+            const SizedBox(height: 15),
+
+            // Reviews List
+            Expanded(
+              child: StreamBuilder<QuerySnapshot>(
+                stream: _firestore
+                    .collection('users')
+                    .doc(myUid) // Fetching reviews for ME (the logged in worker)
+                    .collection('reviews')
+                    .orderBy('timestamp', descending: true)
+                    .snapshots(),
+                builder: (context, snapshot) {
+                  if (snapshot.connectionState == ConnectionState.waiting) {
+                    return const Center(child: CircularProgressIndicator());
+                  }
+                  if (!snapshot.hasData || snapshot.data!.docs.isEmpty) {
+                    return const Center(
+                      child: Column(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          Icon(Icons.rate_review_outlined, size: 60, color: Colors.grey),
+                          SizedBox(height: 10),
+                          Text("No reviews yet", style: TextStyle(color: Colors.grey)),
+                        ],
                       ),
-                      title: Text(widget.username,
-                          style: const TextStyle(
-                              fontWeight: FontWeight.bold)),
-                      subtitle: Text(_reviews[index]),
-                    ),
+                    );
+                  }
+
+                  return ListView.builder(
+                    itemCount: snapshot.data!.docs.length,
+                    itemBuilder: (context, index) {
+                      final data = snapshot.data!.docs[index].data() as Map<String, dynamic>;
+                      return Card(
+                        margin: const EdgeInsets.symmetric(vertical: 6),
+                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                        elevation: 3,
+                        child: ListTile(
+                          leading: CircleAvatar(
+                            backgroundColor: lightSeaGreen.withOpacity(0.2),
+                            child: const Icon(Icons.person, color: Colors.black54),
+                          ),
+                          title: Text(
+                            data['reviewerName'] ?? 'User',
+                            style: const TextStyle(fontWeight: FontWeight.bold),
+                          ),
+                          subtitle: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              const SizedBox(height: 4),
+                              Text(data['text']),
+                            ],
+                          ),
+                          // Optional: Show timestamp
+                          // trailing: Text(
+                          //   // Format timestamp here if needed
+                          //   "Date",
+                          //   style: TextStyle(fontSize: 12, color: Colors.grey),
+                          // ),
+                        ),
+                      );
+                    },
                   );
                 },
               ),
             ),
           ],
         ),
-      ),
-      bottomNavigationBar: BottomNavigationBar(
-        currentIndex: _selectedIndex,
-        selectedItemColor: lightSeaGreen,
-        unselectedItemColor: Colors.grey,
-        onTap: (index) {
-          if (index == 0) {
-            Navigator.pushReplacement(
-              context,
-              MaterialPageRoute(
-                builder: (_) => WorkerProfileScreen(
-                  name: widget.name,
-                  profession: widget.profession,
-                  rating: widget.rating,
-                  reviews: widget.reviews,
-                  distance: widget.distance,
-                ),
-              ),
-            );
-          } else if (index == 1) {
-            Navigator.pushReplacement(
-              context,
-              MaterialPageRoute(
-                builder: (_) => WorkerChatScreen(
-                  username: widget.username,
-                  name: widget.name,
-                  profession: widget.profession,
-                  description: widget.description,
-                  location: widget.location,
-                  phone: widget.phone,
-                  rating: widget.rating,
-                  reviews: widget.reviews,
-                  distance: widget.distance,
-                ),
-              ),
-            );
-          }
-        },
-        items: const [
-          BottomNavigationBarItem(icon: Icon(Icons.person), label: "Profile"),
-          BottomNavigationBarItem(
-              icon: Icon(Icons.chat_bubble_outline), label: "Chat"),
-          BottomNavigationBarItem(
-              icon: Icon(Icons.reviews_outlined), label: "Reviews"),
-        ],
       ),
     );
   }

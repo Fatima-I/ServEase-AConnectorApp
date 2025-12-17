@@ -1,26 +1,22 @@
 import 'package:flutter/material.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:firebase_auth/firebase_auth.dart';
 import 'worker_profile.dart';
 import 'user_worker_chat_screen.dart';
 
 class WorkerReviewsScreen extends StatefulWidget {
-  final String username;
+  final String workerUid; // Required for database lookups and navigation
   final String name;
   final String profession;
-  final String description;
-  final String location;
-  final String phone;
   final String rating;
   final String reviews;
   final String distance;
 
   const WorkerReviewsScreen({
     super.key,
-    required this.username,
+    required this.workerUid,
     required this.name,
     required this.profession,
-    required this.description,
-    required this.location,
-    required this.phone,
     required this.rating,
     required this.reviews,
     required this.distance,
@@ -32,45 +28,47 @@ class WorkerReviewsScreen extends StatefulWidget {
 
 class _WorkerReviewsScreenState extends State<WorkerReviewsScreen> {
   static const Color lightSeaGreen = Color(0xFF20B2AA);
-
   final TextEditingController _reviewController = TextEditingController();
-  final List<String> _reviews = [
-    "Excellent worker! Very punctual and skilled.",
-    "Good experience, polite and efficient.",
-    "Average work, could improve communication.",
-  ];
-  int _selectedIndex = 2;
+  final FirebaseFirestore _firestore = FirebaseFirestore.instance;
+  final FirebaseAuth _auth = FirebaseAuth.instance;
 
-  final bool isWorker = false; // ✅ Always true since only workers have this screen
+  // Set index to 2 for "Reviews" tab
+  final int _selectedIndex = 2;
 
-  @override
-  void dispose() {
-    _reviewController.dispose();
-    super.dispose();
-  }
-
-  void _addReview() {
+  void _addReview() async {
     final text = _reviewController.text.trim();
     if (text.isEmpty) return;
-    setState(() {
-      _reviews.insert(0, text);
-      _reviewController.clear();
+
+    final user = _auth.currentUser;
+    if (user == null) {
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("Please login to review")));
+      return;
+    }
+
+    // Add review to subcollection: users/{workerUid}/reviews
+    await _firestore.collection('users').doc(widget.workerUid).collection('reviews').add({
+      'text': text,
+      'reviewerId': user.uid,
+      'reviewerName': user.displayName ?? 'User', // You might want to fetch real name
+      'timestamp': FieldValue.serverTimestamp(),
     });
+
+    _reviewController.clear();
+    ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("Review added!")));
   }
 
   @override
   Widget build(BuildContext context) {
+    // Check if I am the worker viewing my own reviews (to hide input)
+    final isMe = _auth.currentUser?.uid == widget.workerUid;
+
     return Scaffold(
-      appBar: AppBar(
-        title: const Text("Worker Reviews"),
-        backgroundColor: lightSeaGreen,
-      ),
+      appBar: AppBar(title: const Text("Worker Reviews"), backgroundColor: lightSeaGreen),
       body: Padding(
         padding: const EdgeInsets.all(12.0),
         child: Column(
           children: [
-            // ✅ Worker cannot write reviews, hide text field
-            if (!isWorker)
+            if (!isMe)
               Row(
                 children: [
                   Expanded(
@@ -78,11 +76,8 @@ class _WorkerReviewsScreenState extends State<WorkerReviewsScreen> {
                       controller: _reviewController,
                       decoration: InputDecoration(
                         hintText: "Write a review...",
-                        border: OutlineInputBorder(
-                          borderRadius: BorderRadius.circular(12),
-                        ),
-                        contentPadding: const EdgeInsets.symmetric(
-                            vertical: 10, horizontal: 15),
+                        border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+                        contentPadding: const EdgeInsets.symmetric(vertical: 10, horizontal: 15),
                       ),
                       onSubmitted: (_) => _addReview(),
                     ),
@@ -90,48 +85,44 @@ class _WorkerReviewsScreenState extends State<WorkerReviewsScreen> {
                   const SizedBox(width: 8),
                   ElevatedButton(
                     onPressed: _addReview,
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: lightSeaGreen,
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(12),
-                      ),
-                    ),
-                    child: const Text("Enter"),
+                    style: ElevatedButton.styleFrom(backgroundColor: lightSeaGreen),
+                    child: const Text("Post", style: TextStyle(color: Colors.white)),
                   ),
                 ],
               ),
-
-            if (!isWorker) const SizedBox(height: 15),
-
+            const SizedBox(height: 15),
             Expanded(
-              child: _reviews.isEmpty
-                  ? const Center(
-                child: Text(
-                  "No reviews yet. Be the first to write one!",
-                  style: TextStyle(color: Colors.grey),
-                ),
-              )
-                  : ListView.builder(
-                itemCount: _reviews.length,
-                itemBuilder: (context, index) {
-                  return Card(
-                    margin: const EdgeInsets.symmetric(vertical: 6),
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(12),
-                    ),
-                    elevation: 3,
-                    child: ListTile(
-                      leading: CircleAvatar(
-                        backgroundColor:
-                        lightSeaGreen.withOpacity(0.2),
-                        child: const Icon(Icons.person,
-                            color: Colors.black54),
-                      ),
-                      title: Text(widget.username,
-                          style: const TextStyle(
-                              fontWeight: FontWeight.bold)),
-                      subtitle: Text(_reviews[index]),
-                    ),
+              child: StreamBuilder<QuerySnapshot>(
+                stream: _firestore
+                    .collection('users')
+                    .doc(widget.workerUid)
+                    .collection('reviews')
+                    .orderBy('timestamp', descending: true)
+                    .snapshots(),
+                builder: (context, snapshot) {
+                  if (snapshot.connectionState == ConnectionState.waiting) return const Center(child: CircularProgressIndicator());
+                  if (!snapshot.hasData || snapshot.data!.docs.isEmpty) {
+                    return const Center(child: Text("No reviews yet."));
+                  }
+
+                  return ListView.builder(
+                    itemCount: snapshot.data!.docs.length,
+                    itemBuilder: (context, index) {
+                      final data = snapshot.data!.docs[index].data() as Map<String, dynamic>;
+                      return Card(
+                        margin: const EdgeInsets.symmetric(vertical: 6),
+                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                        elevation: 3,
+                        child: ListTile(
+                          leading: CircleAvatar(
+                              backgroundColor: lightSeaGreen.withOpacity(0.2),
+                              child: const Icon(Icons.person, color: Colors.black54)
+                          ),
+                          title: Text(data['reviewerName'] ?? 'User', style: const TextStyle(fontWeight: FontWeight.bold)),
+                          subtitle: Text(data['text']),
+                        ),
+                      );
+                    },
                   );
                 },
               ),
@@ -139,16 +130,21 @@ class _WorkerReviewsScreenState extends State<WorkerReviewsScreen> {
           ],
         ),
       ),
+      // Seamless Navigation Bar
       bottomNavigationBar: BottomNavigationBar(
         currentIndex: _selectedIndex,
         selectedItemColor: lightSeaGreen,
         unselectedItemColor: Colors.grey,
         onTap: (index) {
+          if (index == _selectedIndex) return;
+
           if (index == 0) {
+            // Navigate Back to Profile
             Navigator.pushReplacement(
               context,
               MaterialPageRoute(
                 builder: (_) => WorkerProfileScreen(
+                  workerUid: widget.workerUid, // PASS UID
                   name: widget.name,
                   profession: widget.profession,
                   rating: widget.rating,
@@ -158,19 +154,14 @@ class _WorkerReviewsScreenState extends State<WorkerReviewsScreen> {
               ),
             );
           } else if (index == 1) {
+            // Navigate to Chat
             Navigator.pushReplacement(
               context,
               MaterialPageRoute(
                 builder: (_) => WorkerChatScreen(
-                  username: widget.username,
-                  name: widget.name,
+                  otherUserUid: widget.workerUid, // PASS UID
+                  otherUserName: widget.name,
                   profession: widget.profession,
-                  description: widget.description,
-                  location: widget.location,
-                  phone: widget.phone,
-                  rating: widget.rating,
-                  reviews: widget.reviews,
-                  distance: widget.distance,
                 ),
               ),
             );
@@ -178,10 +169,8 @@ class _WorkerReviewsScreenState extends State<WorkerReviewsScreen> {
         },
         items: const [
           BottomNavigationBarItem(icon: Icon(Icons.person), label: "Profile"),
-          BottomNavigationBarItem(
-              icon: Icon(Icons.chat_bubble_outline), label: "Chat"),
-          BottomNavigationBarItem(
-              icon: Icon(Icons.reviews_outlined), label: "Reviews"),
+          BottomNavigationBarItem(icon: Icon(Icons.chat_bubble_outline), label: "Chat"),
+          BottomNavigationBarItem(icon: Icon(Icons.reviews_outlined), label: "Reviews"),
         ],
       ),
     );

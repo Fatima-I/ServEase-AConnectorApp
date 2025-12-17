@@ -1,4 +1,6 @@
 import 'package:flutter/material.dart';
+import 'package:firebase_auth/firebase_auth.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
 
 class ProfileScreen extends StatefulWidget {
   final bool isWorker;
@@ -12,303 +14,142 @@ class ProfileScreen extends StatefulWidget {
 class _ProfileScreenState extends State<ProfileScreen> {
   static const Color lightSeaGreen = Color(0xFF20B2AA);
   static const Color bgColor = Color(0xFFE0F7F5);
-  static const String dummyPassword = '1234';
+
+  final FirebaseAuth _auth = FirebaseAuth.instance;
+  final FirebaseFirestore _firestore = FirebaseFirestore.instance;
 
   bool _isEditing = false;
+  bool _isLoading = true;
 
-  // Common fields
+  // Controllers
   final TextEditingController _nameController = TextEditingController();
-  final TextEditingController _emailController = TextEditingController();
   final TextEditingController _phoneController = TextEditingController();
   final TextEditingController _addressController = TextEditingController();
   final TextEditingController _cityController = TextEditingController();
 
-  // Worker only fields
+  // Worker fields
   final TextEditingController _professionController = TextEditingController();
   final TextEditingController _experienceController = TextEditingController();
-  final TextEditingController _workingHoursController = TextEditingController();
   final TextEditingController _bioController = TextEditingController();
 
   @override
   void initState() {
     super.initState();
-    // Set initial data based on user type
+    _fetchUserData();
+  }
+
+  Future<void> _fetchUserData() async {
+    final user = _auth.currentUser;
+    if (user != null) {
+      try {
+        DocumentSnapshot doc = await _firestore.collection('users').doc(user.uid).get();
+        if (doc.exists) {
+          Map<String, dynamic> data = doc.data() as Map<String, dynamic>;
+
+          _nameController.text = data['name'] ?? '';
+          _phoneController.text = data['phone'] ?? '';
+
+          if (widget.isWorker) {
+            Map<String, dynamic> wDetails = data['workerDetails'] ?? {};
+            _professionController.text = wDetails['profession'] ?? '';
+            _experienceController.text = wDetails['experience'] ?? '';
+            _addressController.text = wDetails['address'] ?? '';
+            _cityController.text = wDetails['city'] ?? '';
+            _bioController.text = wDetails['bio'] ?? '';
+          } else {
+            // If user stores address in root or specific userDetails
+            _addressController.text = data['address'] ?? '';
+            _cityController.text = data['city'] ?? '';
+          }
+        }
+      } catch (e) {
+        debugPrint("Error fetching profile: $e");
+      }
+    }
+    setState(() => _isLoading = false);
+  }
+
+  Future<void> _saveProfile() async {
+    setState(() => _isLoading = true);
+    final user = _auth.currentUser;
+    if (user == null) return;
+
+    Map<String, dynamic> updates = {
+      'name': _nameController.text.trim(),
+      'phone': _phoneController.text.trim(),
+    };
+
     if (widget.isWorker) {
-      _nameController.text = 'Ahmad Khan';
-      _emailController.text = 'ahmad@example.com';
-      _phoneController.text = '+92 300 7654321';
-      _addressController.text = 'Johar Town, Lahore';
-      _cityController.text = 'Lahore';
-      _professionController.text = 'Plumber';
-      _experienceController.text = '5 years';
-      _workingHoursController.text = '9 AM - 6 PM';
-      _bioController.text = 'Professional plumber with 5 years of experience.';
+      updates['workerDetails.profession'] = _professionController.text.trim();
+      updates['workerDetails.experience'] = _experienceController.text.trim();
+      updates['workerDetails.address'] = _addressController.text.trim();
+      updates['workerDetails.city'] = _cityController.text.trim();
+      updates['workerDetails.bio'] = _bioController.text.trim();
     } else {
-      _nameController.text = 'Ahmed Hassan';
-      _emailController.text = 'ahmed@example.com';
-      _phoneController.text = '+92 300 1234567';
-      _addressController.text = 'Model Town, Lahore';
-      _cityController.text = 'Lahore';
+      updates['address'] = _addressController.text.trim();
+      updates['city'] = _cityController.text.trim();
+    }
+
+    try {
+      await _firestore.collection('users').doc(user.uid).update(updates);
+      setState(() {
+        _isEditing = false;
+        _isLoading = false;
+      });
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Profile Updated!'), backgroundColor: Colors.green));
+    } catch (e) {
+      setState(() => _isLoading = false);
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Error: $e'), backgroundColor: Colors.red));
     }
   }
 
   @override
-  void dispose() {
-    _nameController.dispose();
-    _emailController.dispose();
-    _phoneController.dispose();
-    _addressController.dispose();
-    _cityController.dispose();
-    _professionController.dispose();
-    _experienceController.dispose();
-    _workingHoursController.dispose();
-    _bioController.dispose();
-    super.dispose();
-  }
-
-  void _showPasswordDialog() {
-    final TextEditingController passwordController = TextEditingController();
-    showDialog(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('Enter Password'),
-        content: TextField(
-          controller: passwordController,
-          obscureText: true,
-          decoration: const InputDecoration(
-            hintText: 'Password (1234)',
-            border: OutlineInputBorder(),
-          ),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: const Text('Cancel', style: TextStyle(color: Colors.grey)),
-          ),
-          ElevatedButton(
-            style: ElevatedButton.styleFrom(backgroundColor: lightSeaGreen),
-            onPressed: () {
-              if (passwordController.text == dummyPassword) {
-                Navigator.pop(context);
-                setState(() => _isEditing = true);
-              } else {
-                Navigator.pop(context);
-                ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(
-                    content: Text('Incorrect password!'),
-                    backgroundColor: Colors.red,
-                  ),
-                );
-              }
-            },
-            child: const Text('Confirm', style: TextStyle(color: Colors.white)),
-          ),
-        ],
-      ),
-    );
-  }
-
-  void _saveProfile() {
-    setState(() => _isEditing = false);
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(
-        content: Text('Profile updated successfully!'),
-        backgroundColor: Colors.green,
-      ),
-    );
-  }
-
-  @override
   Widget build(BuildContext context) {
+    if (_isLoading) return const Scaffold(body: Center(child: CircularProgressIndicator()));
+
     return Scaffold(
       backgroundColor: bgColor,
       appBar: AppBar(
         backgroundColor: lightSeaGreen,
-        elevation: 0,
+        title: const Text('My Profile', style: TextStyle(color: Colors.white)),
         leading: IconButton(
           icon: const Icon(Icons.arrow_back, color: Colors.white),
           onPressed: () => Navigator.pop(context),
         ),
-        title: const Text('My Profile', style: TextStyle(color: Colors.white)),
-        centerTitle: true,
       ),
       body: SingleChildScrollView(
+        padding: const EdgeInsets.all(20),
         child: Column(
           children: [
-            // Header Section
-            Container(
+            // Avatar and header
+            const CircleAvatar(radius: 50, backgroundColor: Colors.white, child: Icon(Icons.person, size: 50, color: lightSeaGreen)),
+            const SizedBox(height: 20),
+
+            _buildTextField(_nameController, 'Full Name', Icons.person),
+            const SizedBox(height: 16),
+            _buildTextField(_phoneController, 'Phone', Icons.phone),
+            const SizedBox(height: 16),
+            _buildTextField(_addressController, 'Address', Icons.location_on),
+            const SizedBox(height: 16),
+            _buildTextField(_cityController, 'City', Icons.location_city),
+
+            if (widget.isWorker) ...[
+              const SizedBox(height: 16),
+              _buildTextField(_professionController, 'Profession', Icons.work),
+              const SizedBox(height: 16),
+              _buildTextField(_experienceController, 'Experience', Icons.timeline),
+              const SizedBox(height: 16),
+              _buildTextField(_bioController, 'Bio', Icons.info, maxLines: 3),
+            ],
+
+            const SizedBox(height: 30),
+            SizedBox(
               width: double.infinity,
-              color: lightSeaGreen,
-              padding: const EdgeInsets.only(bottom: 30),
-              child: Column(
-                children: [
-                  Container(
-                    width: 100,
-                    height: 100,
-                    decoration: const BoxDecoration(
-                      color: Colors.white,
-                      shape: BoxShape.circle,
-                    ),
-                    child: const Icon(Icons.person, size: 50, color: lightSeaGreen),
-                  ),
-                  const SizedBox(height: 12),
-                  Text(
-                    widget.isWorker ? 'Worker Profile' : 'User Profile',
-                    style: const TextStyle(
-                      color: Colors.white,
-                      fontSize: 20,
-                      fontWeight: FontWeight.bold,
-                    ),
-                  ),
-                  if (widget.isWorker) ...[
-                    const SizedBox(height: 8),
-                    Row(
-                      mainAxisAlignment: MainAxisAlignment.center,
-                      children: [
-                        const Icon(Icons.star, color: Colors.amber, size: 20),
-                        const SizedBox(width: 4),
-                        const Text(
-                          '4.8',
-                          style: TextStyle(
-                            color: Colors.white,
-                            fontSize: 16,
-                            fontWeight: FontWeight.bold,
-                          ),
-                        ),
-                        const SizedBox(width: 4),
-                        Text(
-                          '(127 reviews)',
-                          style: TextStyle(
-                            color: Colors.white.withOpacity(0.8),
-                            fontSize: 14,
-                          ),
-                        ),
-                      ],
-                    ),
-                  ],
-                ],
-              ),
-            ),
-
-            // Form Section
-            Padding(
-              padding: const EdgeInsets.all(20),
-              child: Column(
-                children: [
-                  _buildTextField(
-                    controller: _nameController,
-                    label: 'Full Name',
-                    icon: Icons.person_outline,
-                  ),
-                  const SizedBox(height: 16),
-                  _buildTextField(
-                    controller: _emailController,
-                    label: 'Email',
-                    icon: Icons.email_outlined,
-                  ),
-                  const SizedBox(height: 16),
-                  _buildTextField(
-                    controller: _phoneController,
-                    label: 'Phone',
-                    icon: Icons.phone_outlined,
-                  ),
-
-                  // Worker only fields
-                  if (widget.isWorker) ...[
-                    const SizedBox(height: 16),
-                    _buildTextField(
-                      controller: _professionController,
-                      label: 'Profession',
-                      icon: Icons.work_outline,
-                    ),
-                    const SizedBox(height: 16),
-                    _buildTextField(
-                      controller: _experienceController,
-                      label: 'Experience',
-                      icon: Icons.timeline_outlined,
-                    ),
-                    const SizedBox(height: 16),
-                    _buildTextField(
-                      controller: _workingHoursController,
-                      label: 'Working Hours',
-                      icon: Icons.access_time_outlined,
-                    ),
-                  ],
-
-                  const SizedBox(height: 16),
-                  _buildTextField(
-                    controller: _addressController,
-                    label: 'Address',
-                    icon: Icons.location_on_outlined,
-                  ),
-                  const SizedBox(height: 16),
-                  _buildTextField(
-                    controller: _cityController,
-                    label: 'City',
-                    icon: Icons.location_city_outlined,
-                  ),
-
-                  // Worker bio field
-                  if (widget.isWorker) ...[
-                    const SizedBox(height: 16),
-                    _buildTextField(
-                      controller: _bioController,
-                      label: 'Bio',
-                      icon: Icons.info_outline,
-                      maxLines: 3,
-                    ),
-                  ],
-
-                  const SizedBox(height: 30),
-
-                  // Action Buttons
-                  SizedBox(
-                    width: double.infinity,
-                    height: 50,
-                    child: ElevatedButton(
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: _isEditing ? Colors.green : lightSeaGreen,
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(12),
-                        ),
-                      ),
-                      onPressed: _isEditing ? _saveProfile : _showPasswordDialog,
-                      child: Text(
-                        _isEditing ? 'Save Changes' : 'Edit Profile',
-                        style: const TextStyle(
-                          color: Colors.white,
-                          fontSize: 16,
-                          fontWeight: FontWeight.bold,
-                        ),
-                      ),
-                    ),
-                  ),
-
-                  if (_isEditing) ...[
-                    const SizedBox(height: 12),
-                    SizedBox(
-                      width: double.infinity,
-                      height: 50,
-                      child: OutlinedButton(
-                        style: OutlinedButton.styleFrom(
-                          side: const BorderSide(color: Colors.grey),
-                          shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(12),
-                          ),
-                        ),
-                        onPressed: () => setState(() => _isEditing = false),
-                        child: const Text(
-                          'Cancel',
-                          style: TextStyle(
-                            color: Colors.grey,
-                            fontSize: 16,
-                            fontWeight: FontWeight.bold,
-                          ),
-                        ),
-                      ),
-                    ),
-                  ],
-                ],
+              height: 50,
+              child: ElevatedButton(
+                style: ElevatedButton.styleFrom(backgroundColor: _isEditing ? Colors.green : lightSeaGreen),
+                onPressed: _isEditing ? _saveProfile : () => setState(() => _isEditing = true),
+                child: Text(_isEditing ? 'Save Changes' : 'Edit Profile', style: const TextStyle(color: Colors.white)),
               ),
             ),
           ],
@@ -317,12 +158,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
     );
   }
 
-  Widget _buildTextField({
-    required TextEditingController controller,
-    required String label,
-    required IconData icon,
-    int maxLines = 1,
-  }) {
+  Widget _buildTextField(TextEditingController controller, String label, IconData icon, {int maxLines = 1}) {
     return TextField(
       controller: controller,
       enabled: _isEditing,
@@ -332,22 +168,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
         prefixIcon: Icon(icon, color: lightSeaGreen),
         filled: true,
         fillColor: Colors.white,
-        border: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(12),
-          borderSide: BorderSide(color: Colors.grey.shade300),
-        ),
-        enabledBorder: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(12),
-          borderSide: BorderSide(color: Colors.grey.shade300),
-        ),
-        focusedBorder: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(12),
-          borderSide: const BorderSide(color: lightSeaGreen, width: 2),
-        ),
-        disabledBorder: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(12),
-          borderSide: BorderSide(color: Colors.grey.shade200),
-        ),
+        border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
       ),
     );
   }

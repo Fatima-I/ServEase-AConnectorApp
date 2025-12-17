@@ -1,9 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
+import 'package:cloud_firestore/cloud_firestore.dart'; // Needed for role check
 import 'marketplace_screen.dart';
 import 'forgot_password_screen.dart';
 import 'general_info_screen.dart';
-// import 'worker_feed_screen.dart'; // make sure this file exists
 
 class GetStartedScreen extends StatefulWidget {
   const GetStartedScreen({super.key});
@@ -20,6 +20,9 @@ class _GetStartedScreenState extends State<GetStartedScreen> {
   final TextEditingController _usernameController = TextEditingController();
   final TextEditingController _passwordController = TextEditingController();
 
+  // Loading state for login button
+  bool _isLoading = false;
+
   String? _emailError;
   String? _passwordError;
 
@@ -31,7 +34,6 @@ class _GetStartedScreenState extends State<GetStartedScreen> {
   }
 
   Future<void> _login() async {
-    // Clear previous errors before attempting login
     setState(() {
       _emailError = null;
       _passwordError = null;
@@ -40,74 +42,72 @@ class _GetStartedScreenState extends State<GetStartedScreen> {
     final email = _usernameController.text.trim();
     final password = _passwordController.text.trim();
 
-    // Basic validation
     if (email.isEmpty) {
-      setState(() {
-        _emailError = "Email is required";
-      });
+      setState(() => _emailError = "Email is required");
       return;
     }
-
     if (password.isEmpty) {
-      setState(() {
-        _passwordError = "Password is required";
-      });
+      setState(() => _passwordError = "Password is required");
       return;
     }
 
-    if (password.length < 6) {
-      setState(() {
-        _passwordError = "Password must be at least 6 characters";
-      });
-      return;
-    }
+    setState(() => _isLoading = true); // Start loading
 
     try {
-      // Firebase sign-in
-      await FirebaseAuth.instance
+      // 1. Authenticate with Firebase Auth
+      UserCredential userCredential = await FirebaseAuth.instance
           .signInWithEmailAndPassword(email: email, password: password);
 
-      // Login successful, navigate to WorkerFeedScreen
-      if (mounted) {
-        Navigator.pushReplacement(
-          context,
-          MaterialPageRoute(
-            builder: (context) => const WorkerFeedScreen(),
-          ),
-        );
+      User? user = userCredential.user;
+
+      if (user != null) {
+        // 2. Fetch User Role from Firestore
+        DocumentSnapshot userDoc = await FirebaseFirestore.instance
+            .collection('users')
+            .doc(user.uid)
+            .get();
+
+        if (userDoc.exists) {
+          String role = userDoc.get('role') ?? 'user';
+          bool isWorker = role == 'worker';
+
+          // 3. Navigate with correct role
+          if (mounted) {
+            Navigator.pushReplacement(
+              context,
+              MaterialPageRoute(
+                // Pass the actual role here!
+                builder: (context) => WorkerFeedScreen(isWorker: isWorker),
+              ),
+            );
+          }
+        } else {
+          // Handle missing user document
+          setState(() {
+            _emailError = "User data not found in database.";
+          });
+        }
       }
     } on FirebaseAuthException catch (e) {
-      // Handle Firebase-specific errors
       setState(() {
         if (e.code == 'user-not-found') {
           _emailError = "Email doesn't exist";
-        } else if (e.code == 'invalid-email') {
-          _emailError = "Invalid email format";
         } else if (e.code == 'wrong-password') {
           _passwordError = "Wrong password";
         } else if (e.code == 'invalid-credential') {
-          // This is a newer Firebase error code that covers both wrong email and password
-          _emailError = "Email doesn't exist or password is incorrect";
-        } else if (e.code == 'user-disabled') {
-          _emailError = "This account has been disabled";
-        } else if (e.code == 'too-many-requests') {
-          _passwordError = "Too many attempts. Try again later";
+          _emailError = "Invalid email or password";
         } else {
-          // For unknown errors, show in snackbar
-          if (mounted) {
-            ScaffoldMessenger.of(context).showSnackBar(
-              SnackBar(content: Text("Login failed: ${e.message}")),
-            );
-          }
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text("Login failed: ${e.message}")),
+          );
         }
       });
     } catch (e) {
-      // Handle other unexpected errors
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text("An unexpected error occurred: $e")),
-        );
-      }
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text("Error: $e")),
+      );
+    } finally {
+      if (mounted) setState(() => _isLoading = false); // Stop loading
     }
   }
 
@@ -147,12 +147,11 @@ class _GetStartedScreenState extends State<GetStartedScreen> {
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.center,
                         children: [
-                          // Shield Icon
                           Container(
                             padding: const EdgeInsets.all(20),
                             decoration: BoxDecoration(
                               shape: BoxShape.circle,
-                              gradient: LinearGradient(
+                              gradient: const LinearGradient(
                                 colors: [lightSeaGreen, Colors.teal],
                                 begin: Alignment.topLeft,
                                 end: Alignment.bottomRight,
@@ -165,126 +164,71 @@ class _GetStartedScreenState extends State<GetStartedScreen> {
                                 )
                               ],
                             ),
-                            child: const Icon(
-                              Icons.shield,
-                              size: 60,
-                              color: Colors.white,
-                            ),
+                            child: const Icon(Icons.shield, size: 60, color: Colors.white),
                           ),
                           const SizedBox(height: 20),
 
                           const Text(
                             "Login",
-                            style: TextStyle(
-                              fontSize: 28,
-                              fontWeight: FontWeight.bold,
-                              color: lightSeaGreen,
-                            ),
+                            style: TextStyle(fontSize: 28, fontWeight: FontWeight.bold, color: lightSeaGreen),
                           ),
                           const SizedBox(height: 24),
 
-                          // Email Field
                           TextFormField(
                             controller: _usernameController,
                             keyboardType: TextInputType.emailAddress,
                             decoration: InputDecoration(
                               labelText: "Email",
                               prefixIcon: const Icon(Icons.email),
-                              border: OutlineInputBorder(
-                                borderRadius: BorderRadius.circular(12),
-                              ),
+                              border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
                               errorText: _emailError,
-                              errorMaxLines: 2,
                             ),
                           ),
                           const SizedBox(height: 16),
 
-                          // Password Field
                           TextFormField(
                             controller: _passwordController,
                             obscureText: true,
                             decoration: InputDecoration(
                               labelText: "Password",
                               prefixIcon: const Icon(Icons.lock),
-                              border: OutlineInputBorder(
-                                borderRadius: BorderRadius.circular(12),
-                              ),
+                              border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
                               errorText: _passwordError,
-                              errorMaxLines: 2,
                             ),
                           ),
                           const SizedBox(height: 16),
 
-                          // Register Now
                           Row(
                             mainAxisAlignment: MainAxisAlignment.center,
                             children: [
-                              const Text(
-                                "Don't have an account? ",
-                                style: TextStyle(
-                                  fontSize: 14,
-                                  color: Colors.black54,
-                                ),
-                              ),
+                              const Text("Don't have an account? ", style: TextStyle(color: Colors.black54)),
                               TextButton(
-                                onPressed: () {
-                                  Navigator.push(
-                                    context,
-                                    MaterialPageRoute(
-                                      builder: (context) =>
-                                      const GeneralInfoScreen(),
-                                    ),
-                                  );
-                                },
-                                child: const Text(
-                                  "Register Now",
-                                  style: TextStyle(
-                                    fontSize: 14,
-                                    color: lightSeaGreen,
-                                    fontWeight: FontWeight.w600,
-                                  ),
-                                ),
+                                onPressed: () => Navigator.push(context, MaterialPageRoute(builder: (context) => const GeneralInfoScreen())),
+                                child: const Text("Register Now", style: TextStyle(color: lightSeaGreen, fontWeight: FontWeight.w600)),
                               ),
                             ],
                           ),
                           const SizedBox(height: 16),
 
-                          // Forgot Password
                           TextButton(
-                            onPressed: () {
-                              Navigator.push(
-                                context,
-                                MaterialPageRoute(
-                                  builder: (context) =>
-                                  const ForgotPasswordScreen(),
-                                ),
-                              );
-                            },
+                            onPressed: () => Navigator.push(context, MaterialPageRoute(builder: (context) => const ForgotPasswordScreen())),
                             child: const Text("Forgot Password?"),
                           ),
 
                           const SizedBox(height: 20),
 
-                          // Login Button
                           SizedBox(
                             width: double.infinity,
                             child: ElevatedButton(
                               style: ElevatedButton.styleFrom(
                                 backgroundColor: lightSeaGreen,
-                                padding:
-                                const EdgeInsets.symmetric(vertical: 14),
-                                shape: RoundedRectangleBorder(
-                                  borderRadius: BorderRadius.circular(12),
-                                ),
+                                padding: const EdgeInsets.symmetric(vertical: 14),
+                                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
                               ),
-                              onPressed: _login,
-                              child: const Text(
-                                "LOGIN",
-                                style: TextStyle(
-                                  fontSize: 18,
-                                  color: Colors.white,
-                                ),
-                              ),
+                              onPressed: _isLoading ? null : _login, // Disable if loading
+                              child: _isLoading
+                                  ? const SizedBox(height: 20, width: 20, child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2))
+                                  : const Text("LOGIN", style: TextStyle(fontSize: 18, color: Colors.white)),
                             ),
                           ),
                         ],
