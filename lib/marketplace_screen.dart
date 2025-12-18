@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
-import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:firebase_auth/firebase_auth.dart';
 import 'user_all_chats_list_screen.dart';
 import 'edit_profile_screen.dart';
 import 'about_screen.dart';
@@ -23,12 +23,13 @@ class _WorkerFeedScreenState extends State<WorkerFeedScreen> {
 
   final GlobalKey<ScaffoldState> _scaffoldKey = GlobalKey<ScaffoldState>();
   final TextEditingController _searchController = TextEditingController();
-  final FirebaseAuth _auth = FirebaseAuth.instance;
 
   String _selectedCategory = 'All';
   String _searchQuery = '';
+
+  // Filter values
   double _selectedRating = 0.0;
-  double _selectedDistance = 10.0; // Restored distance variable
+  double _selectedDistance = 10.0;
 
   final List<String> _categories = [
     'All', 'Plumber', 'Electrician', 'Tutor', 'Tailor',
@@ -41,21 +42,40 @@ class _WorkerFeedScreenState extends State<WorkerFeedScreen> {
     super.dispose();
   }
 
-  void _handleLogout() async {
-    await _auth.signOut();
-    if (mounted) {
-      Navigator.pushNamedAndRemoveUntil(context, '/', (route) => false);
-    }
+  void _handleLogout() {
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Logout'),
+        content: const Text('Are you sure you want to logout?'),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Cancel', style: TextStyle(color: Colors.grey)),
+          ),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(
+              backgroundColor: Colors.red,
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+            ),
+            onPressed: () async {
+              await FirebaseAuth.instance.signOut();
+              if (mounted) Navigator.pushNamedAndRemoveUntil(context, '/', (route) => false);
+            },
+            child: const Text('Logout', style: TextStyle(color: Colors.white)),
+          ),
+        ],
+      ),
+    );
   }
 
   @override
   Widget build(BuildContext context) {
-    final currentUser = _auth.currentUser;
-
     return Scaffold(
       key: _scaffoldKey,
       backgroundColor: bgColor,
-      drawer: _buildDrawer(currentUser),
+      drawer: _buildDrawer(),
       body: SafeArea(
         child: Column(
           children: [
@@ -90,7 +110,11 @@ class _WorkerFeedScreenState extends State<WorkerFeedScreen> {
               padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
               child: TextField(
                 controller: _searchController,
-                onChanged: (value) => setState(() => _searchQuery = value),
+                onChanged: (value) {
+                  setState(() {
+                    _searchQuery = value;
+                  });
+                },
                 decoration: InputDecoration(
                   hintText: 'Search by name or profession...',
                   prefixIcon: const Icon(Icons.search, color: lightSeaGreen),
@@ -99,7 +123,9 @@ class _WorkerFeedScreenState extends State<WorkerFeedScreen> {
                     icon: const Icon(Icons.clear, color: Colors.grey),
                     onPressed: () {
                       _searchController.clear();
-                      setState(() => _searchQuery = '');
+                      setState(() {
+                        _searchQuery = '';
+                      });
                     },
                   )
                       : null,
@@ -148,133 +174,151 @@ class _WorkerFeedScreenState extends State<WorkerFeedScreen> {
                 },
               ),
             ),
+
             const Divider(height: 1),
 
-            // Worker List
+            // Worker List (Connected to Firebase)
             Expanded(
               child: StreamBuilder<QuerySnapshot>(
-                stream: FirebaseFirestore.instance
-                    .collection('users')
-                    .where('role', isEqualTo: 'worker')
-                    .snapshots(),
-                builder: (context, snapshot) {
-                  if (snapshot.hasError) return const Center(child: Text("Error loading workers"));
-                  if (snapshot.connectionState == ConnectionState.waiting) {
-                    return const Center(child: CircularProgressIndicator());
-                  }
+                  stream: FirebaseFirestore.instance
+                      .collection('users')
+                      .where('role', isEqualTo: 'worker')
+                      .snapshots(),
+                  builder: (context, snapshot) {
+                    if (snapshot.connectionState == ConnectionState.waiting) {
+                      return const Center(child: CircularProgressIndicator());
+                    }
 
-                  final docs = snapshot.data!.docs;
+                    if (!snapshot.hasData || snapshot.data!.docs.isEmpty) {
+                      return _buildNoDataView();
+                    }
 
-                  final filteredWorkers = docs.where((doc) {
-                    final data = doc.data() as Map<String, dynamic>;
-                    final workerDetails = data['workerDetails'] ?? {};
-
-                    final name = (data['name'] ?? '').toString().toLowerCase();
-                    final profession = (workerDetails['profession'] ?? '').toString();
-
-                    final matchesSearch = _searchQuery.isEmpty ||
-                        name.contains(_searchQuery.toLowerCase()) ||
-                        profession.toLowerCase().contains(_searchQuery.toLowerCase());
-                    final matchesCategory = _selectedCategory == 'All' || profession == _selectedCategory;
-                    final rating = (workerDetails['rating'] ?? 0.0).toDouble();
-                    final matchesRating = rating >= _selectedRating;
-
-                    // Note: We are mocking distance logic here since we don't have real geo-coordinates
-                    // In a real app, calculate distance between current user and worker here.
-                    final mockDistance = 5.0; // Assuming everyone is 5km away for now
-                    final matchesDistance = mockDistance <= _selectedDistance;
-
-                    return matchesSearch && matchesCategory && matchesRating && matchesDistance;
-                  }).toList();
-
-                  if (filteredWorkers.isEmpty) {
-                    return Center(
-                      child: Column(
-                        mainAxisAlignment: MainAxisAlignment.center,
-                        children: [
-                          Icon(Icons.search_off, size: 80, color: Colors.grey[400]),
-                          const SizedBox(height: 16),
-                          Text('No workers found', style: TextStyle(fontSize: 18, color: Colors.grey[600])),
-                        ],
-                      ),
-                    );
-                  }
-
-                  return ListView.builder(
-                    padding: const EdgeInsets.all(16),
-                    itemCount: filteredWorkers.length,
-                    itemBuilder: (context, index) {
-                      final doc = filteredWorkers[index];
+                    // CLIENT SIDE FILTERING (To match your old logic)
+                    final filteredWorkers = snapshot.data!.docs.where((doc) {
                       final data = doc.data() as Map<String, dynamic>;
                       final workerDetails = data['workerDetails'] ?? {};
 
-                      final name = data['name'] ?? 'Unknown';
-                      final profession = workerDetails['profession'] ?? 'Worker';
-                      final rating = (workerDetails['rating'] ?? 0.0).toStringAsFixed(1);
-                      final reviewsCount = (workerDetails['reviewCount'] ?? 0).toString();
-                      final city = workerDetails['city'] ?? 'Unknown City';
+                      String name = (data['name'] ?? '').toString();
+                      String profession = (workerDetails['profession'] ?? '').toString();
+                      double rating = (workerDetails['rating'] ?? 0.0).toDouble();
+                      // Mock distance since we don't have GPS yet
+                      double distance = 5.0;
 
-                      return Card(
-                        margin: const EdgeInsets.only(bottom: 16),
-                        elevation: 3,
-                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-                        child: ListTile(
-                          contentPadding: const EdgeInsets.all(16),
-                          leading: Container(
-                            width: 70,
-                            height: 70,
-                            decoration: BoxDecoration(
-                              color: lightSeaGreen.withOpacity(0.2),
-                              borderRadius: BorderRadius.circular(12),
-                            ),
-                            child: const Icon(Icons.person, size: 35, color: lightSeaGreen),
+                      final matchesCategory = _selectedCategory == 'All' ||
+                          profession == _selectedCategory;
+
+                      final matchesSearch = _searchQuery.isEmpty ||
+                          profession.toLowerCase().contains(_searchQuery.toLowerCase()) ||
+                          name.toLowerCase().contains(_searchQuery.toLowerCase());
+
+                      final matchesRating = rating >= _selectedRating;
+                      final matchesDistance = distance <= _selectedDistance;
+
+                      return matchesCategory && matchesSearch && matchesRating && matchesDistance;
+                    }).toList();
+
+                    if (filteredWorkers.isEmpty) {
+                      return _buildNoDataView();
+                    }
+
+                    return ListView.builder(
+                      padding: const EdgeInsets.all(16),
+                      itemCount: filteredWorkers.length,
+                      itemBuilder: (context, index) {
+                        final doc = filteredWorkers[index];
+                        final data = doc.data() as Map<String, dynamic>;
+                        final workerDetails = data['workerDetails'] ?? {};
+
+                        String name = data['name'] ?? 'Unknown';
+                        String profession = workerDetails['profession'] ?? 'Worker';
+                        String rating = (workerDetails['rating'] ?? 0.0).toStringAsFixed(1);
+                        String reviews = (workerDetails['reviewCount'] ?? 0).toString();
+                        String distance = "5.0"; // Fixed for now
+
+                        return Card(
+                          margin: const EdgeInsets.only(bottom: 16),
+                          elevation: 3,
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(16),
                           ),
-                          title: Text(name, style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
-                          subtitle: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Text(profession, style: TextStyle(fontSize: 14, color: Colors.grey[600])),
-                              const SizedBox(height: 6),
-                              Row(
-                                children: [
-                                  const Icon(Icons.star, color: Colors.amber, size: 16),
-                                  const SizedBox(width: 4),
-                                  Text('$rating ($reviewsCount)', style: const TextStyle(fontSize: 13)),
-                                  const SizedBox(width: 12),
-                                  Icon(Icons.location_city, size: 16, color: Colors.grey[600]),
-                                  const SizedBox(width: 4),
-                                  Text(city, style: TextStyle(fontSize: 13, color: Colors.grey[600])),
-                                ],
+                          child: ListTile(
+                            contentPadding: const EdgeInsets.all(16),
+                            leading: Container(
+                              width: 70,
+                              height: 70,
+                              decoration: BoxDecoration(
+                                color: lightSeaGreen.withOpacity(0.2),
+                                borderRadius: BorderRadius.circular(12),
                               ),
-                            ],
-                          ),
-                          trailing: ElevatedButton(
-                            style: ElevatedButton.styleFrom(
-                              backgroundColor: lightSeaGreen,
-                              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                              child: const Icon(Icons.person, size: 35, color: lightSeaGreen),
                             ),
-                            onPressed: () {
-                              Navigator.push(
-                                context,
-                                MaterialPageRoute(
-                                  builder: (context) => WorkerProfileScreen(
-                                    workerUid: doc.id,
-                                    name: name,
-                                    profession: profession,
-                                    rating: rating,
-                                    reviews: reviewsCount,
-                                    distance: "5.0", // Mock distance
-                                  ),
+                            title: Text(
+                              name,
+                              style: const TextStyle(
+                                fontSize: 18,
+                                fontWeight: FontWeight.bold,
+                              ),
+                            ),
+                            subtitle: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(
+                                  profession,
+                                  style: TextStyle(fontSize: 14, color: Colors.grey[600]),
                                 ),
-                              );
-                            },
-                            child: const Text('View', style: TextStyle(color: Colors.white)),
+                                const SizedBox(height: 6),
+                                Row(
+                                  children: [
+                                    const Icon(Icons.star, color: Colors.amber, size: 16),
+                                    const SizedBox(width: 4),
+                                    Text(
+                                      '$rating ($reviews)',
+                                      style: const TextStyle(fontSize: 13),
+                                    ),
+                                    const SizedBox(width: 12),
+                                    Icon(Icons.location_on, size: 16, color: Colors.grey[600]),
+                                    const SizedBox(width: 4),
+                                    Text(
+                                      '$distance km',
+                                      style: TextStyle(fontSize: 13, color: Colors.grey[600]),
+                                    ),
+                                  ],
+                                ),
+                              ],
+                            ),
+                            trailing: ElevatedButton(
+                              style: ElevatedButton.styleFrom(
+                                backgroundColor: lightSeaGreen,
+                                shape: RoundedRectangleBorder(
+                                  borderRadius: BorderRadius.circular(10),
+                                ),
+                              ),
+                              onPressed: () {
+                                // Navigating with REAL UID
+                                Navigator.push(
+                                  context,
+                                  MaterialPageRoute(
+                                    builder: (context) => WorkerProfileScreen(
+                                      workerUid: doc.id,
+                                      name: name,
+                                      profession: profession,
+                                      rating: rating,
+                                      reviews: reviews,
+                                      distance: distance,
+                                    ),
+                                  ),
+                                );
+                              },
+                              child: const Text(
+                                'View',
+                                style: TextStyle(color: Colors.white),
+                              ),
+                            ),
                           ),
-                        ),
-                      );
-                    },
-                  );
-                },
+                        );
+                      },
+                    );
+                  }
               ),
             ),
           ],
@@ -283,6 +327,35 @@ class _WorkerFeedScreenState extends State<WorkerFeedScreen> {
     );
   }
 
+  Widget _buildNoDataView() {
+    return Center(
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          Icon(Icons.search_off, size: 80, color: Colors.grey[400]),
+          const SizedBox(height: 16),
+          Text(
+            'No workers found',
+            style: TextStyle(
+              fontSize: 18,
+              color: Colors.grey[600],
+              fontWeight: FontWeight.w500,
+            ),
+          ),
+          const SizedBox(height: 8),
+          Text(
+            'Try adjusting your filters',
+            style: TextStyle(
+              fontSize: 14,
+              color: Colors.grey[500],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  // Filters bottom sheet
   void _showFilters() {
     showModalBottomSheet(
       context: context,
@@ -299,29 +372,56 @@ class _WorkerFeedScreenState extends State<WorkerFeedScreen> {
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              const Text('Filters', style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold)),
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  const Text(
+                    'Filters',
+                    style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
+                  ),
+                  TextButton(
+                    onPressed: () {
+                      setModalState(() {
+                        _selectedRating = 0.0;
+                        _selectedDistance = 10.0;
+                      });
+                    },
+                    child: const Text(
+                      'Reset',
+                      style: TextStyle(color: lightSeaGreen),
+                    ),
+                  ),
+                ],
+              ),
               const SizedBox(height: 20),
-              const Text('Minimum Rating', style: TextStyle(fontWeight: FontWeight.w600)),
+              const Text('Minimum Rating',
+                  style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600)),
               Slider(
                 value: _selectedRating,
                 min: 0.0,
                 max: 5.0,
-                divisions: 5,
+                divisions: 10,
                 activeColor: lightSeaGreen,
-                label: '$_selectedRating+',
-                onChanged: (val) => setModalState(() => _selectedRating = val),
+                label: _selectedRating == 0.0
+                    ? 'Any'
+                    : '${_selectedRating.toStringAsFixed(1)}+',
+                onChanged: (value) {
+                  setModalState(() => _selectedRating = value);
+                },
               ),
               const SizedBox(height: 10),
-              // RESTORED DISTANCE SLIDER
-              const Text('Maximum Distance', style: TextStyle(fontWeight: FontWeight.w600)),
+              const Text('Maximum Distance',
+                  style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600)),
               Slider(
                 value: _selectedDistance,
                 min: 1.0,
-                max: 50.0,
-                divisions: 10,
+                max: 10.0,
+                divisions: 9,
                 activeColor: lightSeaGreen,
-                label: '${_selectedDistance.round()} km',
-                onChanged: (val) => setModalState(() => _selectedDistance = val),
+                label: '${_selectedDistance.toStringAsFixed(0)} km',
+                onChanged: (value) {
+                  setModalState(() => _selectedDistance = value);
+                },
               ),
               const SizedBox(height: 10),
               SizedBox(
@@ -330,14 +430,20 @@ class _WorkerFeedScreenState extends State<WorkerFeedScreen> {
                   style: ElevatedButton.styleFrom(
                     backgroundColor: lightSeaGreen,
                     padding: const EdgeInsets.symmetric(vertical: 14),
+                    shape:
+                    RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
                   ),
                   onPressed: () {
                     setState(() {});
                     Navigator.pop(context);
                   },
-                  child: const Text('Apply Filters', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+                  child: const Text(
+                    'Apply Filters',
+                    style:
+                    TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.bold),
+                  ),
                 ),
-              )
+              ),
             ],
           ),
         ),
@@ -345,8 +451,10 @@ class _WorkerFeedScreenState extends State<WorkerFeedScreen> {
     );
   }
 
-  Widget _buildDrawer(User? currentUser) {
-    final String email = currentUser?.email ?? 'Guest';
+  // Drawer
+  Widget _buildDrawer() {
+    final user = FirebaseAuth.instance.currentUser;
+    final email = user?.email ?? 'Guest';
 
     return Drawer(
       child: Container(
@@ -362,53 +470,109 @@ class _WorkerFeedScreenState extends State<WorkerFeedScreen> {
                 children: [
                   Container(
                     padding: const EdgeInsets.all(8),
-                    decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(12)),
-                    child: Icon(widget.isWorker ? Icons.handyman_rounded : Icons.person, size: 40, color: lightSeaGreen),
+                    decoration: BoxDecoration(
+                      color: Colors.white,
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                    child: Icon(
+                      widget.isWorker ? Icons.handyman_rounded : Icons.person,
+                      size: 40,
+                      color: lightSeaGreen,
+                    ),
                   ),
                   const SizedBox(height: 12),
-                  const Text('Welcome!', style: TextStyle(color: Colors.white, fontSize: 22, fontWeight: FontWeight.bold)),
-                  Text(email, style: const TextStyle(color: Colors.white, fontSize: 14)),
+                  const Text(
+                    'Welcome!',
+                    style: TextStyle(color: Colors.white, fontSize: 22, fontWeight: FontWeight.bold),
+                  ),
+                  const SizedBox(height: 4),
+                  Text(
+                    email,
+                    style: const TextStyle(color: Colors.white, fontSize: 14),
+                  ),
                 ],
               ),
             ),
-            _drawerItem(Icons.shop, 'Marketplace', onTap: () => Navigator.pop(context)),
+            _drawerItem(Icons.shop, 'Marketplace',
+              onTap: () {
+                Navigator.pop(context);
+              },
+            ),
 
             if (widget.isWorker) ...[
-              _drawerItem(Icons.person, 'My Profile', onTap: () {
-                Navigator.pop(context);
-                Navigator.push(context, MaterialPageRoute(
-                    builder: (context) => const WorkerProfileScreen(
-                      // Pass current user info if viewing self
-                      workerUid: '', // You'd need to handle "view self" logic here or fetch self data
-                      name: 'Me', profession: 'Worker', rating: '0', reviews: '0', distance: '0',
-                    )));
-              }),
-              _drawerItem(Icons.star_rate, 'My Reviews', onTap: () {
-                Navigator.pop(context);
-                Navigator.push(context, MaterialPageRoute(
-                    builder: (context) => const WorkerViewScreen(
-                        username: '', name: '', profession: '', description: '', location: '', phone: '', rating: '', reviews: '', distance: ''
-                    )));
-              }),
+              _drawerItem(
+                Icons.person,
+                'My Profile',
+                onTap: () {
+                  Navigator.pop(context);
+                  Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                      builder: (context) => WorkerProfileScreen(
+                        workerUid: user!.uid,
+                        name: 'Me',
+                        profession: 'Worker',
+                        rating: '0',
+                        reviews: '0',
+                        distance: '0',
+                      ),
+                    ),
+                  );
+                },
+              ),
+              _drawerItem(
+                Icons.star_rate,
+                'My Reviews',
+                onTap: () {
+                  Navigator.pop(context);
+                  Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                      builder: (context) => const WorkerViewScreen(),
+                    ),
+                  );
+                },
+              ),
             ],
 
-            _drawerItem(Icons.edit, 'Edit Profile', onTap: () {
-              Navigator.pop(context);
-              Navigator.push(context, MaterialPageRoute(builder: (context) => ProfileScreen(isWorker: widget.isWorker)));
-            }),
+            _drawerItem(
+              Icons.edit,
+              'Edit Profile',
+              onTap: () {
+                Navigator.pop(context);
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(builder: (context) => ProfileScreen(isWorker: widget.isWorker)),
+                );
+              },
+            ),
 
-            _drawerItem(Icons.chat, 'Chats', onTap: () {
-              Navigator.pop(context);
-              Navigator.push(context, MaterialPageRoute(builder: (context) => const UserChatListScreen()));
-            }),
-
-            _drawerItem(Icons.info_outline, 'About', onTap: () {
-              Navigator.pop(context);
-              Navigator.push(context, MaterialPageRoute(builder: (context) => const AboutScreen()));
-            }),
-
+            _drawerItem(Icons.chat, 'Chats',
+              onTap: () {
+                Navigator.pop(context);
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(builder: (context) => const UserChatListScreen()),
+                );
+              },
+            ),
             const Divider(),
-            _drawerItem(Icons.logout, 'Logout', color: Colors.red, onTap: _handleLogout),
+            _drawerItem(Icons.info_outline, 'About',
+              onTap: () {
+                Navigator.pop(context);
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(builder: (context) => const AboutScreen()),
+                );
+              },
+            ),
+            const Divider(),
+            _drawerItem(
+              Icons.logout,
+              'Logout',
+              color: Colors.red,
+              onTap: _handleLogout,
+            ),
           ],
         ),
       ),
@@ -419,7 +583,7 @@ class _WorkerFeedScreenState extends State<WorkerFeedScreen> {
     return ListTile(
       leading: Icon(icon, color: color ?? lightSeaGreen),
       title: Text(title, style: TextStyle(fontSize: 16, color: color ?? Colors.black87)),
-      onTap: onTap,
+      onTap: onTap ?? () => Navigator.pop(context),
     );
   }
 }

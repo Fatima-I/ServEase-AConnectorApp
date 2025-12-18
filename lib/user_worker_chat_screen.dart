@@ -9,6 +9,7 @@ class WorkerChatScreen extends StatefulWidget {
   final String otherUserUid;
   final String otherUserName;
   final String? profession;
+  final bool showNav;
 
   const WorkerChatScreen({
     super.key,
@@ -16,6 +17,7 @@ class WorkerChatScreen extends StatefulWidget {
     required this.otherUserUid,
     required this.otherUserName,
     this.profession,
+    this.showNav = true,
   });
 
   @override
@@ -24,12 +26,13 @@ class WorkerChatScreen extends StatefulWidget {
 
 class _WorkerChatScreenState extends State<WorkerChatScreen> {
   static const Color lightSeaGreen = Color(0xFF20B2AA);
+
   final TextEditingController _messageController = TextEditingController();
   final FirebaseAuth _auth = FirebaseAuth.instance;
   final FirebaseFirestore _firestore = FirebaseFirestore.instance;
 
   String? _currentChatId;
-  String _myRealName = "User"; // Will be updated from Firestore
+  String _myRealName = "User";
   final int _selectedIndex = 1;
 
   @override
@@ -43,7 +46,6 @@ class _WorkerChatScreenState extends State<WorkerChatScreen> {
     final myUid = _auth.currentUser?.uid;
     if (myUid == null) return;
 
-    // 1. Fetch my real name from Firestore to ensure we don't save "User"
     try {
       final userDoc = await _firestore.collection('users').doc(myUid).get();
       if (userDoc.exists && userDoc.data()!.containsKey('name')) {
@@ -55,13 +57,10 @@ class _WorkerChatScreenState extends State<WorkerChatScreen> {
       debugPrint("Error fetching name: $e");
     }
 
-    // 2. Setup Chat ID if not passed
     if (_currentChatId == null) {
       final idCandidate = myUid.compareTo(widget.otherUserUid) < 0
           ? "${myUid}_${widget.otherUserUid}"
           : "${widget.otherUserUid}_$myUid";
-
-      // Check if exists to avoid flickering, though strictly not necessary with simple logic
       setState(() => _currentChatId = idCandidate);
     }
   }
@@ -75,23 +74,35 @@ class _WorkerChatScreenState extends State<WorkerChatScreen> {
 
     final chatRef = _firestore.collection('chats').doc(_currentChatId);
 
-    // Add message to subcollection
     await chatRef.collection('messages').add({
       'text': text,
       'senderId': myUid,
       'timestamp': FieldValue.serverTimestamp(),
     });
 
-    // Update Chat Metadata with REAL NAMES
     await chatRef.set({
       'participants': [myUid, widget.otherUserUid],
       'participantNames': {
-        myUid: _myRealName, // Uses the fetched name
+        myUid: _myRealName,
         widget.otherUserUid: widget.otherUserName,
       },
       'lastMessage': text,
       'lastMessageTime': FieldValue.serverTimestamp(),
     }, SetOptions(merge: true));
+  }
+
+  // --- OPEN PROFILE ON CLICK ---
+  void _openProfile() {
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => WorkerProfileScreen(
+          workerUid: widget.otherUserUid,
+          name: widget.otherUserName,
+          profession: widget.profession ?? "Worker",
+        ),
+      ),
+    );
   }
 
   @override
@@ -101,16 +112,20 @@ class _WorkerChatScreenState extends State<WorkerChatScreen> {
     return Scaffold(
       appBar: AppBar(
         backgroundColor: lightSeaGreen,
-        title: Row(
-          children: [
-            CircleAvatar(
-              radius: 18,
-              backgroundColor: Colors.white.withOpacity(0.2),
-              child: const Icon(Icons.person, color: Colors.white),
-            ),
-            const SizedBox(width: 10),
-            Text(widget.otherUserName),
-          ],
+        // CLICKABLE TITLE
+        title: InkWell(
+          onTap: _openProfile,
+          child: Row(
+            children: [
+              CircleAvatar(
+                radius: 18,
+                backgroundColor: Colors.white.withOpacity(0.2),
+                child: const Icon(Icons.person, color: Colors.white),
+              ),
+              const SizedBox(width: 10),
+              Text(widget.otherUserName, style: const TextStyle(fontSize: 18, color: Colors.white)),
+            ],
+          ),
         ),
       ),
       body: Column(
@@ -182,27 +197,13 @@ class _WorkerChatScreenState extends State<WorkerChatScreen> {
           ),
         ],
       ),
-      bottomNavigationBar: BottomNavigationBar(
+      bottomNavigationBar: widget.showNav ? BottomNavigationBar(
         currentIndex: _selectedIndex,
         selectedItemColor: lightSeaGreen,
         unselectedItemColor: Colors.grey,
         onTap: (index) {
-          if (index == _selectedIndex) return;
-
           if (index == 0) {
-            Navigator.pushReplacement(
-              context,
-              MaterialPageRoute(
-                builder: (_) => WorkerProfileScreen(
-                  workerUid: widget.otherUserUid,
-                  name: widget.otherUserName,
-                  profession: widget.profession ?? "Worker",
-                  rating: "4.5",
-                  reviews: "0",
-                  distance: "N/A",
-                ),
-              ),
-            );
+            _openProfile();
           } else if (index == 2) {
             Navigator.pushReplacement(
               context,
@@ -224,7 +225,7 @@ class _WorkerChatScreenState extends State<WorkerChatScreen> {
           BottomNavigationBarItem(icon: Icon(Icons.chat_bubble_outline), label: "Chat"),
           BottomNavigationBarItem(icon: Icon(Icons.reviews_outlined), label: "Reviews"),
         ],
-      ),
+      ) : null,
     );
   }
 }

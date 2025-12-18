@@ -5,7 +5,7 @@ import 'worker_profile.dart';
 import 'user_worker_chat_screen.dart';
 
 class WorkerReviewsScreen extends StatefulWidget {
-  final String workerUid; // Required for database lookups and navigation
+  final String workerUid;
   final String name;
   final String profession;
   final String rating;
@@ -28,143 +28,141 @@ class WorkerReviewsScreen extends StatefulWidget {
 
 class _WorkerReviewsScreenState extends State<WorkerReviewsScreen> {
   static const Color lightSeaGreen = Color(0xFF20B2AA);
-  final TextEditingController _reviewController = TextEditingController();
-  final FirebaseFirestore _firestore = FirebaseFirestore.instance;
-  final FirebaseAuth _auth = FirebaseAuth.instance;
-
-  // Set index to 2 for "Reviews" tab
+  final _textCtrl = TextEditingController();
+  double _rating = 5.0;
   final int _selectedIndex = 2;
 
-  void _addReview() async {
-    final text = _reviewController.text.trim();
-    if (text.isEmpty) return;
+  void _post() async {
+    if (_textCtrl.text.isEmpty) return;
+    User? user = FirebaseAuth.instance.currentUser;
+    if (user == null) return;
 
-    final user = _auth.currentUser;
-    if (user == null) {
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("Please login to review")));
-      return;
+    try {
+      final workerRef = FirebaseFirestore.instance.collection('users').doc(widget.workerUid);
+
+      // Get my real name
+      String myName = "User";
+      final myDoc = await FirebaseFirestore.instance.collection('users').doc(user.uid).get();
+      if(myDoc.exists) myName = myDoc['name'] ?? "User";
+
+      await FirebaseFirestore.instance.runTransaction((transaction) async {
+        DocumentSnapshot snapshot = await transaction.get(workerRef);
+        if (!snapshot.exists) return;
+
+        Map<String, dynamic> data = snapshot.data() as Map<String, dynamic>;
+        Map<String, dynamic> wDetails = data['workerDetails'] ?? {};
+
+        double currentRating = (wDetails['rating'] ?? 0.0).toDouble();
+        int currentCount = (wDetails['reviewCount'] ?? 0).toInt();
+
+        double newAvg = ((currentRating * currentCount) + _rating) / (currentCount + 1);
+        int newCount = currentCount + 1;
+
+        transaction.update(workerRef, {
+          'workerDetails.rating': double.parse(newAvg.toStringAsFixed(1)),
+          'workerDetails.reviewCount': newCount,
+        });
+
+        DocumentReference newReviewRef = workerRef.collection('reviews').doc();
+        transaction.set(newReviewRef, {
+          'text': _textCtrl.text,
+          'rating': _rating,
+          'reviewerId': user.uid,
+          'reviewerName': myName,
+          'timestamp': FieldValue.serverTimestamp(),
+        });
+      });
+
+      _textCtrl.clear();
+      setState(() => _rating = 5.0);
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("Review Posted!")));
+
+    } catch (e) {
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text("Error: $e")));
     }
-
-    // Add review to subcollection: users/{workerUid}/reviews
-    await _firestore.collection('users').doc(widget.workerUid).collection('reviews').add({
-      'text': text,
-      'reviewerId': user.uid,
-      'reviewerName': user.displayName ?? 'User', // You might want to fetch real name
-      'timestamp': FieldValue.serverTimestamp(),
-    });
-
-    _reviewController.clear();
-    ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("Review added!")));
   }
 
   @override
   Widget build(BuildContext context) {
-    // Check if I am the worker viewing my own reviews (to hide input)
-    final isMe = _auth.currentUser?.uid == widget.workerUid;
+    final user = FirebaseAuth.instance.currentUser;
+    bool isMe = user?.uid == widget.workerUid;
 
     return Scaffold(
-      appBar: AppBar(title: const Text("Worker Reviews"), backgroundColor: lightSeaGreen),
-      body: Padding(
-        padding: const EdgeInsets.all(12.0),
-        child: Column(
-          children: [
-            if (!isMe)
-              Row(
-                children: [
-                  Expanded(
-                    child: TextField(
-                      controller: _reviewController,
-                      decoration: InputDecoration(
-                        hintText: "Write a review...",
-                        border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
-                        contentPadding: const EdgeInsets.symmetric(vertical: 10, horizontal: 15),
-                      ),
-                      onSubmitted: (_) => _addReview(),
-                    ),
-                  ),
-                  const SizedBox(width: 8),
-                  ElevatedButton(
-                    onPressed: _addReview,
-                    style: ElevatedButton.styleFrom(backgroundColor: lightSeaGreen),
-                    child: const Text("Post", style: TextStyle(color: Colors.white)),
-                  ),
-                ],
-              ),
-            const SizedBox(height: 15),
-            Expanded(
-              child: StreamBuilder<QuerySnapshot>(
-                stream: _firestore
-                    .collection('users')
-                    .doc(widget.workerUid)
-                    .collection('reviews')
-                    .orderBy('timestamp', descending: true)
-                    .snapshots(),
-                builder: (context, snapshot) {
-                  if (snapshot.connectionState == ConnectionState.waiting) return const Center(child: CircularProgressIndicator());
-                  if (!snapshot.hasData || snapshot.data!.docs.isEmpty) {
-                    return const Center(child: Text("No reviews yet."));
-                  }
+      appBar: AppBar(title: const Text("Reviews"), backgroundColor: lightSeaGreen),
+      body: StreamBuilder<QuerySnapshot>(
+        stream: FirebaseFirestore.instance.collection('users').doc(widget.workerUid).collection('reviews').orderBy('timestamp', descending: true).snapshots(),
+        builder: (context, snapshot) {
+          if (!snapshot.hasData) return const Center(child: CircularProgressIndicator());
 
-                  return ListView.builder(
-                    itemCount: snapshot.data!.docs.length,
-                    itemBuilder: (context, index) {
-                      final data = snapshot.data!.docs[index].data() as Map<String, dynamic>;
-                      return Card(
-                        margin: const EdgeInsets.symmetric(vertical: 6),
-                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-                        elevation: 3,
-                        child: ListTile(
-                          leading: CircleAvatar(
-                              backgroundColor: lightSeaGreen.withOpacity(0.2),
-                              child: const Icon(Icons.person, color: Colors.black54)
-                          ),
-                          title: Text(data['reviewerName'] ?? 'User', style: const TextStyle(fontWeight: FontWeight.bold)),
-                          subtitle: Text(data['text']),
-                        ),
-                      );
-                    },
-                  );
-                },
+          final docs = snapshot.data!.docs;
+          bool hasReviewed = docs.any((doc) => doc['reviewerId'] == user?.uid);
+
+          return Column(
+            children: [
+              if (!isMe && !hasReviewed)
+                Container(
+                  padding: const EdgeInsets.all(16),
+                  color: Colors.white,
+                  child: Column(
+                    children: [
+                      Row(
+                        children: [
+                          const Text("Rating: "),
+                          Expanded(child: Slider(value: _rating, min: 1, max: 5, divisions: 4, label: "$_rating", activeColor: lightSeaGreen, onChanged: (v) => setState(() => _rating = v))),
+                          Text("$_rating", style: const TextStyle(fontWeight: FontWeight.bold)),
+                        ],
+                      ),
+                      Row(
+                        children: [
+                          Expanded(child: TextField(controller: _textCtrl, decoration: const InputDecoration(hintText: "Write a review..."))),
+                          const SizedBox(width: 8),
+                          ElevatedButton(onPressed: _post, style: ElevatedButton.styleFrom(backgroundColor: lightSeaGreen), child: const Text("Post", style: TextStyle(color: Colors.white))),
+                        ],
+                      ),
+                    ],
+                  ),
+                )
+              else if (!isMe && hasReviewed)
+                Container(
+                  padding: const EdgeInsets.all(10),
+                  color: Colors.grey[100],
+                  child: const Text("You have already reviewed this worker.", style: TextStyle(color: Colors.grey)),
+                ),
+
+              Expanded(
+                child: ListView.builder(
+                  padding: const EdgeInsets.all(16),
+                  itemCount: docs.length,
+                  itemBuilder: (context, index) {
+                    var data = docs[index].data() as Map<String, dynamic>;
+                    return Card(
+                      child: ListTile(
+                        leading: CircleAvatar(backgroundColor: lightSeaGreen.withOpacity(0.2), child: const Icon(Icons.person, color: lightSeaGreen)),
+                        title: Text(data['reviewerName'] ?? "User"),
+                        subtitle: Text(data['text'] ?? ""),
+                        trailing: Row(mainAxisSize: MainAxisSize.min, children: [const Icon(Icons.star, color: Colors.amber, size: 14), Text(" ${data['rating']}")],),
+                      ),
+                    );
+                  },
+                ),
               ),
-            ),
-          ],
-        ),
+            ],
+          );
+        },
       ),
-      // Seamless Navigation Bar
       bottomNavigationBar: BottomNavigationBar(
         currentIndex: _selectedIndex,
         selectedItemColor: lightSeaGreen,
         unselectedItemColor: Colors.grey,
         onTap: (index) {
-          if (index == _selectedIndex) return;
-
           if (index == 0) {
-            // Navigate Back to Profile
-            Navigator.pushReplacement(
-              context,
-              MaterialPageRoute(
-                builder: (_) => WorkerProfileScreen(
-                  workerUid: widget.workerUid, // PASS UID
-                  name: widget.name,
-                  profession: widget.profession,
-                  rating: widget.rating,
-                  reviews: widget.reviews,
-                  distance: widget.distance,
-                ),
-              ),
-            );
+            Navigator.pushReplacement(context, MaterialPageRoute(builder: (_) => WorkerProfileScreen(
+                workerUid: widget.workerUid, name: widget.name, profession: widget.profession, rating: widget.rating, reviews: widget.reviews, distance: widget.distance
+            )));
           } else if (index == 1) {
-            // Navigate to Chat
-            Navigator.pushReplacement(
-              context,
-              MaterialPageRoute(
-                builder: (_) => WorkerChatScreen(
-                  otherUserUid: widget.workerUid, // PASS UID
-                  otherUserName: widget.name,
-                  profession: widget.profession,
-                ),
-              ),
-            );
+            Navigator.pushReplacement(context, MaterialPageRoute(builder: (_) => WorkerChatScreen(
+                otherUserUid: widget.workerUid, otherUserName: widget.name, profession: widget.profession
+            )));
           }
         },
         items: const [

@@ -5,6 +5,7 @@ import 'worker_reviews_screen.dart';
 
 class WorkerProfileScreen extends StatefulWidget {
   final String workerUid;
+  // Optional parameters for smoother transition before data loads
   final String name;
   final String profession;
   final String rating;
@@ -14,11 +15,11 @@ class WorkerProfileScreen extends StatefulWidget {
   const WorkerProfileScreen({
     super.key,
     required this.workerUid,
-    required this.name,
-    required this.profession,
-    required this.rating,
-    required this.reviews,
-    required this.distance,
+    this.name = 'Loading...',
+    this.profession = '',
+    this.rating = '0.0',
+    this.reviews = '0',
+    this.distance = '0.0',
   });
 
   @override
@@ -29,43 +30,68 @@ class _WorkerProfileScreenState extends State<WorkerProfileScreen> {
   static const Color lightSeaGreen = Color(0xFF20B2AA);
   int _selectedIndex = 0;
 
+  // --- REPAIR FUNCTION (Click Wrench to Fix Ratings) ---
+  Future<void> _fixRatings() async {
+    final workerRef = FirebaseFirestore.instance.collection('users').doc(widget.workerUid);
+    final reviewsSnapshot = await workerRef.collection('reviews').get();
+
+    if (reviewsSnapshot.docs.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("No reviews found.")));
+      return;
+    }
+
+    double totalRating = 0;
+    int count = 0;
+
+    for (var doc in reviewsSnapshot.docs) {
+      totalRating += (doc['rating'] ?? 0).toDouble();
+      count++;
+    }
+
+    double newAverage = count > 0 ? totalRating / count : 0.0;
+
+    await workerRef.update({
+      'workerDetails.rating': double.parse(newAverage.toStringAsFixed(1)),
+      'workerDetails.reviewCount': count,
+    });
+
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text("Fixed! Count: $count, Avg: $newAverage")));
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: Colors.white,
       appBar: AppBar(
+        title: const Text("Worker Profile"),
         backgroundColor: lightSeaGreen,
-        elevation: 0,
         leading: IconButton(
-          icon: const Icon(Icons.arrow_back, color: Colors.white),
-          onPressed: () => Navigator.pop(context),
+            icon: const Icon(Icons.arrow_back, color: Colors.white),
+            onPressed: () => Navigator.pop(context)
         ),
-        title: const Text('Worker Profile', style: TextStyle(color: Colors.white)),
-        centerTitle: true,
+        actions: [
+          IconButton(
+            icon: const Icon(Icons.build, color: Colors.white),
+            tooltip: "Fix Ratings",
+            onPressed: _fixRatings,
+          )
+        ],
       ),
-      // FETCH REAL DATA HERE
-      body: FutureBuilder<DocumentSnapshot>(
-        future: FirebaseFirestore.instance.collection('users').doc(widget.workerUid).get(),
+      body: StreamBuilder<DocumentSnapshot>(
+        stream: FirebaseFirestore.instance.collection('users').doc(widget.workerUid).snapshots(),
         builder: (context, snapshot) {
-          if (snapshot.connectionState == ConnectionState.waiting) {
-            return const Center(child: CircularProgressIndicator());
-          }
+          if (!snapshot.hasData) return const Center(child: CircularProgressIndicator());
 
-          // Default values if fetch fails or fields missing
-          String phone = "Not available";
-          String description = "Experienced ${widget.profession}.";
-          String location = "${widget.distance} km away";
-          String username = "@${widget.name.replaceAll(' ', '_').toLowerCase()}";
+          final data = snapshot.data!.data() as Map<String, dynamic>;
+          final workerDetails = data['workerDetails'] as Map<String, dynamic>? ?? {};
 
-          if (snapshot.hasData && snapshot.data!.exists) {
-            final data = snapshot.data!.data() as Map<String, dynamic>;
-            final workerDetails = data['workerDetails'] as Map<String, dynamic>? ?? {};
-
-            phone = data['phone'] ?? phone;
-            description = workerDetails['bio'] ?? description;
-            location = "${workerDetails['city'] ?? 'Lahore'} (${widget.distance} km)";
-            // You can also update name/profession here if you want the absolute latest
-          }
+          final liveName = data['name'] ?? widget.name;
+          final liveProf = workerDetails['profession'] ?? widget.profession;
+          final liveRating = (workerDetails['rating'] ?? widget.rating).toString();
+          final liveReviews = (workerDetails['reviewCount'] ?? widget.reviews).toString();
+          final bio = workerDetails['bio'] ?? "No description available.";
+          final phone = data['phone'] ?? "+92 300 1234567";
+          final username = "@${liveName.toLowerCase().replaceAll(' ', '_')}";
 
           return SingleChildScrollView(
             padding: const EdgeInsets.all(16),
@@ -80,27 +106,27 @@ class _WorkerProfileScreenState extends State<WorkerProfileScreen> {
                   ),
                   child: Row(
                     children: [
-                      CircleAvatar(
+                      const CircleAvatar(
                         radius: 45,
-                        backgroundColor: lightSeaGreen.withOpacity(0.3),
-                        child: const Icon(Icons.person, size: 45, color: Colors.white),
+                        backgroundColor: lightSeaGreen,
+                        child: Icon(Icons.person, size: 45, color: Colors.white),
                       ),
                       const SizedBox(width: 16),
                       Expanded(
                         child: Column(
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
-                            Text(widget.name, style: const TextStyle(fontSize: 20, fontWeight: FontWeight.bold)),
+                            Text(liveName, style: const TextStyle(fontSize: 20, fontWeight: FontWeight.bold)),
                             const SizedBox(height: 4),
-                            Text(widget.profession, style: TextStyle(color: Colors.grey[700], fontSize: 16)),
+                            Text(liveProf, style: const TextStyle(color: Colors.grey, fontSize: 16)),
                             const SizedBox(height: 8),
                             Row(
                               children: [
                                 const Icon(Icons.star, color: Colors.amber, size: 20),
                                 const SizedBox(width: 4),
-                                Text(widget.rating, style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+                                Text(liveRating, style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
                                 const SizedBox(width: 4),
-                                Text('(${widget.reviews} reviews)', style: TextStyle(fontSize: 14, color: Colors.grey[600])),
+                                Text('($liveReviews reviews)', style: const TextStyle(fontSize: 14, color: Colors.grey)),
                               ],
                             ),
                           ],
@@ -109,15 +135,17 @@ class _WorkerProfileScreenState extends State<WorkerProfileScreen> {
                     ],
                   ),
                 ),
+
                 const SizedBox(height: 25),
                 const Align(
                   alignment: Alignment.centerLeft,
                   child: Text("General Information", style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
                 ),
                 const SizedBox(height: 10),
+
                 _infoTile(Icons.person_outline, "Username", username),
-                _infoTile(Icons.description_outlined, "Description", description),
-                _infoTile(Icons.location_on_outlined, "Location", location),
+                _infoTile(Icons.description_outlined, "Description", bio),
+                _infoTile(Icons.location_on_outlined, "Location", "${widget.distance} km away"),
                 _infoTile(Icons.phone_outlined, "Phone", phone),
               ],
             ),
@@ -129,32 +157,14 @@ class _WorkerProfileScreenState extends State<WorkerProfileScreen> {
         selectedItemColor: lightSeaGreen,
         unselectedItemColor: Colors.grey,
         onTap: (index) {
-          if (index == _selectedIndex) return;
           if (index == 1) {
-            Navigator.pushReplacement(
-              context,
-              MaterialPageRoute(
-                builder: (_) => WorkerChatScreen(
-                  otherUserUid: widget.workerUid,
-                  otherUserName: widget.name,
-                  profession: widget.profession,
-                ),
-              ),
-            );
+            Navigator.pushReplacement(context, MaterialPageRoute(builder: (_) => WorkerChatScreen(
+                otherUserUid: widget.workerUid, otherUserName: widget.name, profession: widget.profession
+            )));
           } else if (index == 2) {
-            Navigator.pushReplacement(
-              context,
-              MaterialPageRoute(
-                builder: (_) => WorkerReviewsScreen(
-                  workerUid: widget.workerUid,
-                  name: widget.name,
-                  profession: widget.profession,
-                  rating: widget.rating,
-                  reviews: widget.reviews,
-                  distance: widget.distance,
-                ),
-              ),
-            );
+            Navigator.pushReplacement(context, MaterialPageRoute(builder: (_) => WorkerReviewsScreen(
+                workerUid: widget.workerUid, name: widget.name, profession: widget.profession, rating: widget.rating, reviews: widget.reviews, distance: widget.distance
+            )));
           }
         },
         items: const [
@@ -166,7 +176,7 @@ class _WorkerProfileScreenState extends State<WorkerProfileScreen> {
     );
   }
 
-  Widget _infoTile(IconData icon, String title, String value) {
+  Widget _infoTile(IconData icon, String title, String val) {
     return Card(
       elevation: 2,
       margin: const EdgeInsets.symmetric(vertical: 6),
@@ -174,7 +184,7 @@ class _WorkerProfileScreenState extends State<WorkerProfileScreen> {
       child: ListTile(
         leading: Icon(icon, color: lightSeaGreen),
         title: Text(title, style: const TextStyle(fontWeight: FontWeight.bold)),
-        subtitle: Text(value),
+        subtitle: Text(val),
       ),
     );
   }

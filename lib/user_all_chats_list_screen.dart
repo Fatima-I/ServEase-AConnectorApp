@@ -17,59 +17,38 @@ class UserChatListScreen extends StatelessWidget {
       appBar: AppBar(
         title: const Text("Chats", style: TextStyle(color: Colors.white)),
         backgroundColor: lightSeaGreen,
-        leading: IconButton(
-          icon: const Icon(Icons.arrow_back, color: Colors.white),
-          onPressed: () => Navigator.pop(context),
-        ),
+        leading: IconButton(icon: const Icon(Icons.arrow_back, color: Colors.white), onPressed: () => Navigator.pop(context)),
       ),
       body: StreamBuilder<QuerySnapshot>(
-        stream: FirebaseFirestore.instance
-            .collection('chats')
-            .where('participants', arrayContains: myUid)
-            .snapshots(),
+        stream: FirebaseFirestore.instance.collection('chats').where('participants', arrayContains: myUid).snapshots(),
         builder: (context, snapshot) {
-          if (snapshot.connectionState == ConnectionState.waiting) return const Center(child: CircularProgressIndicator());
-          if (!snapshot.hasData || snapshot.data!.docs.isEmpty) return const Center(child: Text("No chats yet."));
-
-          // Sort in Dart to avoid Index issues
-          final docs = snapshot.data!.docs.toList();
-          docs.sort((a, b) {
-            final t1 = (a.data() as Map<String,dynamic>)['lastMessageTime'] as Timestamp?;
-            final t2 = (b.data() as Map<String,dynamic>)['lastMessageTime'] as Timestamp?;
-            if (t1 == null || t2 == null) return 0;
-            return t2.compareTo(t1);
-          });
+          if (!snapshot.hasData) return const Center(child: CircularProgressIndicator());
+          if (snapshot.data!.docs.isEmpty) return const Center(child: Text("No chats yet."));
 
           return ListView.builder(
-            itemCount: docs.length,
+            itemCount: snapshot.data!.docs.length,
             padding: const EdgeInsets.all(8),
             itemBuilder: (context, index) {
-              final chatDoc = docs[index];
+              final chatDoc = snapshot.data!.docs[index];
               final data = chatDoc.data() as Map<String, dynamic>;
-
               final List participants = data['participants'];
               final otherUid = participants.firstWhere((id) => id != myUid, orElse: () => null);
 
               if (otherUid == null) return const SizedBox();
 
-              // --- MAGIC FIX: Fetch the real name instead of using the saved one ---
               return FutureBuilder<DocumentSnapshot>(
                 future: FirebaseFirestore.instance.collection('users').doc(otherUid).get(),
                 builder: (context, userSnapshot) {
-
-                  // Default to what's in the chat doc, or "Loading..." while fetching
                   String displayName = '...';
-                  String? profession; // We can even fetch profession if needed
+                  String? profession;
 
                   if (userSnapshot.hasData && userSnapshot.data!.exists) {
                     final userData = userSnapshot.data!.data() as Map<String, dynamic>;
                     displayName = userData['name'] ?? 'Unknown User';
-                    // Optional: Get profession if available
                     if (userData.containsKey('workerDetails')) {
                       profession = userData['workerDetails']['profession'];
                     }
                   } else {
-                    // Fallback to the name stored in the chat document
                     final names = data['participantNames'] as Map<String, dynamic>? ?? {};
                     displayName = names[otherUid] ?? 'User';
                   }
@@ -78,17 +57,9 @@ class UserChatListScreen extends StatelessWidget {
                     elevation: 3,
                     margin: const EdgeInsets.symmetric(vertical: 8, horizontal: 4),
                     child: ListTile(
-                      leading: CircleAvatar(
-                          backgroundColor: lightSeaGreen,
-                          child: const Icon(Icons.person, color: Colors.white)
-                      ),
+                      leading: CircleAvatar(backgroundColor: lightSeaGreen, child: const Icon(Icons.person, color: Colors.white)),
                       title: Text(displayName, style: const TextStyle(fontWeight: FontWeight.bold)),
-                      subtitle: Text(
-                          data['lastMessage'] ?? '',
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis
-                      ),
-                      trailing: const Icon(Icons.arrow_forward_ios, size: 14, color: Colors.grey),
+                      subtitle: Text(data['lastMessage'] ?? '', maxLines: 1, overflow: TextOverflow.ellipsis),
                       onTap: () {
                         Navigator.push(
                           context,
@@ -96,8 +67,9 @@ class UserChatListScreen extends StatelessWidget {
                             builder: (context) => WorkerChatScreen(
                               chatId: chatDoc.id,
                               otherUserUid: otherUid,
-                              otherUserName: displayName, // Pass the REAL name here
+                              otherUserName: displayName,
                               profession: profession,
+                              showNav: false, // Hides bottom bar
                             ),
                           ),
                         );
