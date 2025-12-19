@@ -2,10 +2,10 @@ import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'worker_profile.dart';
-import 'user_worker_chat_screen.dart';
+import 'user_worker_chat_screen.dart'; // Make sure file name matches your chat screen file
 
 class WorkerReviewsScreen extends StatefulWidget {
-  final String workerUid; // Required for database lookups and navigation
+  final String workerUid;
   final String name;
   final String profession;
   final String rating;
@@ -32,8 +32,27 @@ class _WorkerReviewsScreenState extends State<WorkerReviewsScreen> {
   final FirebaseFirestore _firestore = FirebaseFirestore.instance;
   final FirebaseAuth _auth = FirebaseAuth.instance;
 
-  // Set index to 2 for "Reviews" tab
   final int _selectedIndex = 2;
+  String _myRealName = "User"; // To store fetcher user name
+
+  @override
+  void initState() {
+    super.initState();
+    _fetchMyName();
+  }
+
+  // --- 1. Apka apna naam fetch karein (Review post karne ke liye) ---
+  Future<void> _fetchMyName() async {
+    final user = _auth.currentUser;
+    if (user != null) {
+      final doc = await _firestore.collection('users').doc(user.uid).get();
+      if (doc.exists && doc.data()!.containsKey('name')) {
+        setState(() {
+          _myRealName = doc.data()!['name'];
+        });
+      }
+    }
+  }
 
   void _addReview() async {
     final text = _reviewController.text.trim();
@@ -45,21 +64,42 @@ class _WorkerReviewsScreenState extends State<WorkerReviewsScreen> {
       return;
     }
 
-    // Add review to subcollection: users/{workerUid}/reviews
     await _firestore.collection('users').doc(widget.workerUid).collection('reviews').add({
       'text': text,
       'reviewerId': user.uid,
-      'reviewerName': user.displayName ?? 'User', // You might want to fetch real name
+      'reviewerName': _myRealName, // Use fetched real name
       'timestamp': FieldValue.serverTimestamp(),
     });
+
+    // Optional: Update Worker's rating/count logic here if needed
 
     _reviewController.clear();
     ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("Review added!")));
   }
 
+  // --- 2. Helper to Navigate to Profile (Fixes the Error) ---
+  void _navigateToProfile() async {
+    try {
+      // Worker ka latest data fetch karein
+      DocumentSnapshot doc = await _firestore.collection('users').doc(widget.workerUid).get();
+
+      if (doc.exists && mounted) {
+        Navigator.pushReplacement(
+          context,
+          MaterialPageRoute(
+            builder: (_) => WorkerProfileScreen(
+              workerData: doc.data() as Map<String, dynamic>, // <-- Correct Data Passed
+            ),
+          ),
+        );
+      }
+    } catch (e) {
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("Error loading profile")));
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
-    // Check if I am the worker viewing my own reviews (to hide input)
     final isMe = _auth.currentUser?.uid == widget.workerUid;
 
     return Scaffold(
@@ -130,7 +170,6 @@ class _WorkerReviewsScreenState extends State<WorkerReviewsScreen> {
           ],
         ),
       ),
-      // Seamless Navigation Bar
       bottomNavigationBar: BottomNavigationBar(
         currentIndex: _selectedIndex,
         selectedItemColor: lightSeaGreen,
@@ -139,27 +178,15 @@ class _WorkerReviewsScreenState extends State<WorkerReviewsScreen> {
           if (index == _selectedIndex) return;
 
           if (index == 0) {
-            // Navigate Back to Profile
-            Navigator.pushReplacement(
-              context,
-              MaterialPageRoute(
-                builder: (_) => WorkerProfileScreen(
-                  workerUid: widget.workerUid, // PASS UID
-                  name: widget.name,
-                  profession: widget.profession,
-                  rating: widget.rating,
-                  reviews: widget.reviews,
-                  distance: widget.distance,
-                ),
-              ),
-            );
+            // FIX: Call helper function instead of direct push with old params
+            _navigateToProfile();
           } else if (index == 1) {
-            // Navigate to Chat
+            // Chat Navigation (Yeh already sahi hai kyunke humne chat screen update kar di thi)
             Navigator.pushReplacement(
               context,
               MaterialPageRoute(
                 builder: (_) => WorkerChatScreen(
-                  otherUserUid: widget.workerUid, // PASS UID
+                  otherUserUid: widget.workerUid,
                   otherUserName: widget.name,
                   profession: widget.profession,
                 ),

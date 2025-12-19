@@ -29,21 +29,41 @@ class _WorkerChatScreenState extends State<WorkerChatScreen> {
   final FirebaseFirestore _firestore = FirebaseFirestore.instance;
 
   String? _currentChatId;
-  String _myRealName = "User"; // Will be updated from Firestore
+  String _myRealName = "User";
   final int _selectedIndex = 1;
+
+  // --- NEW VARIABLE: Worker ka poora data yahan save hoga ---
+  Map<String, dynamic>? _fullWorkerData;
+  bool _isLoadingProfile = true;
 
   @override
   void initState() {
     super.initState();
     _currentChatId = widget.chatId;
     _fetchMyNameAndSetup();
+    _fetchWorkerFullData(); // <--- YE NAYA FUNCTION HAI
+  }
+
+  // --- 1. Worker ka poora data fetch karein (Taake Profile ko bhej sakein) ---
+  Future<void> _fetchWorkerFullData() async {
+    try {
+      DocumentSnapshot doc = await _firestore.collection('users').doc(widget.otherUserUid).get();
+      if (doc.exists) {
+        setState(() {
+          _fullWorkerData = doc.data() as Map<String, dynamic>;
+          _isLoadingProfile = false;
+        });
+      }
+    } catch (e) {
+      debugPrint("Error fetching worker profile: $e");
+      setState(() => _isLoadingProfile = false);
+    }
   }
 
   Future<void> _fetchMyNameAndSetup() async {
     final myUid = _auth.currentUser?.uid;
     if (myUid == null) return;
 
-    // 1. Fetch my real name from Firestore to ensure we don't save "User"
     try {
       final userDoc = await _firestore.collection('users').doc(myUid).get();
       if (userDoc.exists && userDoc.data()!.containsKey('name')) {
@@ -55,13 +75,10 @@ class _WorkerChatScreenState extends State<WorkerChatScreen> {
       debugPrint("Error fetching name: $e");
     }
 
-    // 2. Setup Chat ID if not passed
     if (_currentChatId == null) {
       final idCandidate = myUid.compareTo(widget.otherUserUid) < 0
           ? "${myUid}_${widget.otherUserUid}"
           : "${widget.otherUserUid}_$myUid";
-
-      // Check if exists to avoid flickering, though strictly not necessary with simple logic
       setState(() => _currentChatId = idCandidate);
     }
   }
@@ -72,21 +89,18 @@ class _WorkerChatScreenState extends State<WorkerChatScreen> {
     _messageController.clear();
 
     final myUid = _auth.currentUser!.uid;
-
     final chatRef = _firestore.collection('chats').doc(_currentChatId);
 
-    // Add message to subcollection
     await chatRef.collection('messages').add({
       'text': text,
       'senderId': myUid,
       'timestamp': FieldValue.serverTimestamp(),
     });
 
-    // Update Chat Metadata with REAL NAMES
     await chatRef.set({
       'participants': [myUid, widget.otherUserUid],
       'participantNames': {
-        myUid: _myRealName, // Uses the fetched name
+        myUid: _myRealName,
         widget.otherUserUid: widget.otherUserName,
       },
       'lastMessage': text,
@@ -190,23 +204,26 @@ class _WorkerChatScreenState extends State<WorkerChatScreen> {
           if (index == _selectedIndex) return;
 
           if (index == 0) {
-            Navigator.pushReplacement(
-              context,
-              MaterialPageRoute(
-                builder: (_) => WorkerProfileScreen(
-                  workerUid: widget.otherUserUid,
-                  name: widget.otherUserName,
-                  profession: widget.profession ?? "Worker",
-                  rating: "4.5",
-                  reviews: "0",
-                  distance: "N/A",
+            // --- FIX IS HERE: PROFILE NAVIGATION ---
+            if (_fullWorkerData != null) {
+              Navigator.pushReplacement(
+                context,
+                MaterialPageRoute(
+                  builder: (_) => WorkerProfileScreen(
+                    workerData: _fullWorkerData!, // <-- Ab hum poora Map bhej rahe hain
+                  ),
                 ),
-              ),
-            );
+              );
+            } else {
+              ScaffoldMessenger.of(context).showSnackBar(
+                const SnackBar(content: Text("Loading profile... Please wait.")),
+              );
+            }
           } else if (index == 2) {
             Navigator.pushReplacement(
               context,
               MaterialPageRoute(
+                // Note: Agar WorkerReviewsScreen update nahi hua, to ye waisa hi rahega
                 builder: (_) => WorkerReviewsScreen(
                   workerUid: widget.otherUserUid,
                   name: widget.otherUserName,

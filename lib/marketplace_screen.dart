@@ -4,7 +4,7 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'user_all_chats_list_screen.dart';
 import 'edit_profile_screen.dart';
 import 'about_screen.dart';
-import 'worker_profile.dart';
+import 'worker_profile.dart'; // Make sure this import is correct
 import 'worker_reviews_screen.dart';
 import 'worker_view_review.dart';
 
@@ -28,7 +28,7 @@ class _WorkerFeedScreenState extends State<WorkerFeedScreen> {
   String _selectedCategory = 'All';
   String _searchQuery = '';
   double _selectedRating = 0.0;
-  double _selectedDistance = 10.0; // Restored distance variable
+  double _selectedDistance = 10.0;
 
   final List<String> _categories = [
     'All', 'Plumber', 'Electrician', 'Tutor', 'Tailor',
@@ -179,9 +179,8 @@ class _WorkerFeedScreenState extends State<WorkerFeedScreen> {
                     final rating = (workerDetails['rating'] ?? 0.0).toDouble();
                     final matchesRating = rating >= _selectedRating;
 
-                    // Note: We are mocking distance logic here since we don't have real geo-coordinates
-                    // In a real app, calculate distance between current user and worker here.
-                    final mockDistance = 5.0; // Assuming everyone is 5km away for now
+                    // Mock Distance Logic (Since we don't have real geo-query yet)
+                    final mockDistance = 5.0;
                     final matchesDistance = mockDistance <= _selectedDistance;
 
                     return matchesSearch && matchesCategory && matchesRating && matchesDistance;
@@ -205,6 +204,7 @@ class _WorkerFeedScreenState extends State<WorkerFeedScreen> {
                     itemCount: filteredWorkers.length,
                     itemBuilder: (context, index) {
                       final doc = filteredWorkers[index];
+                      // Fetch Full Data
                       final data = doc.data() as Map<String, dynamic>;
                       final workerDetails = data['workerDetails'] ?? {};
 
@@ -254,16 +254,12 @@ class _WorkerFeedScreenState extends State<WorkerFeedScreen> {
                               shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
                             ),
                             onPressed: () {
+                              // --- FIX: Passing 'workerData' instead of individual parameters ---
                               Navigator.push(
                                 context,
                                 MaterialPageRoute(
                                   builder: (context) => WorkerProfileScreen(
-                                    workerUid: doc.id,
-                                    name: name,
-                                    profession: profession,
-                                    rating: rating,
-                                    reviews: reviewsCount,
-                                    distance: "5.0", // Mock distance
+                                    workerData: data,
                                   ),
                                 ),
                               );
@@ -312,7 +308,6 @@ class _WorkerFeedScreenState extends State<WorkerFeedScreen> {
                 onChanged: (val) => setModalState(() => _selectedRating = val),
               ),
               const SizedBox(height: 10),
-              // RESTORED DISTANCE SLIDER
               const Text('Maximum Distance', style: TextStyle(fontWeight: FontWeight.w600)),
               Slider(
                 value: _selectedDistance,
@@ -374,17 +369,27 @@ class _WorkerFeedScreenState extends State<WorkerFeedScreen> {
             _drawerItem(Icons.shop, 'Marketplace', onTap: () => Navigator.pop(context)),
 
             if (widget.isWorker) ...[
-              _drawerItem(Icons.person, 'My Profile', onTap: () {
+              _drawerItem(Icons.person, 'My Profile', onTap: () async {
                 Navigator.pop(context);
-                Navigator.push(context, MaterialPageRoute(
-                    builder: (context) => const WorkerProfileScreen(
-                      // Pass current user info if viewing self
-                      workerUid: '', // You'd need to handle "view self" logic here or fetch self data
-                      name: 'Me', profession: 'Worker', rating: '0', reviews: '0', distance: '0',
-                    )));
+                final user = FirebaseAuth.instance.currentUser;
+                if (user != null) {
+                  // --- FIX: Fetch My Data before opening profile ---
+                  try {
+                    DocumentSnapshot myDoc = await FirebaseFirestore.instance.collection('users').doc(user.uid).get();
+                    if (myDoc.exists) {
+                      Navigator.push(context, MaterialPageRoute(
+                          builder: (context) => WorkerProfileScreen(
+                            workerData: myDoc.data() as Map<String, dynamic>,
+                          )));
+                    }
+                  } catch (e) {
+                    ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("Error loading profile")));
+                  }
+                }
               }),
               _drawerItem(Icons.star_rate, 'My Reviews', onTap: () {
                 Navigator.pop(context);
+                // Note: Agar reviews screen updated nahi hai, to ye old parameters use karega
                 Navigator.push(context, MaterialPageRoute(
                     builder: (context) => const WorkerViewScreen(
                         username: '', name: '', profession: '', description: '', location: '', phone: '', rating: '', reviews: '', distance: ''
