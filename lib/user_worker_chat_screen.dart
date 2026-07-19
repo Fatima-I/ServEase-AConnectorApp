@@ -9,7 +9,6 @@ class WorkerChatScreen extends StatefulWidget {
   final String otherUserUid;
   final String otherUserName;
   final String? profession;
-  final bool showNav;
 
   const WorkerChatScreen({
     super.key,
@@ -17,7 +16,6 @@ class WorkerChatScreen extends StatefulWidget {
     required this.otherUserUid,
     required this.otherUserName,
     this.profession,
-    this.showNav = true,
   });
 
   @override
@@ -26,7 +24,6 @@ class WorkerChatScreen extends StatefulWidget {
 
 class _WorkerChatScreenState extends State<WorkerChatScreen> {
   static const Color lightSeaGreen = Color(0xFF20B2AA);
-
   final TextEditingController _messageController = TextEditingController();
   final FirebaseAuth _auth = FirebaseAuth.instance;
   final FirebaseFirestore _firestore = FirebaseFirestore.instance;

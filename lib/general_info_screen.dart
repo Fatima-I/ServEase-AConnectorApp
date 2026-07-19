@@ -98,7 +98,6 @@ class _GeneralInfoScreenState extends State<GeneralInfoScreen> {
         "name": _nameController.text.trim(),
         "email": _emailController.text.trim(),
         "phone": _phoneController.text.trim(),
-        //"password": _passwordController.text.trim(),
         "gender": _gender,
         "role": _isWorker! ? "worker" : "user",
         // --- UPDATED LOGIC: Workers need approval (false), Users auto-approved (true) ---
@@ -163,6 +162,7 @@ class _GeneralInfoScreenState extends State<GeneralInfoScreen> {
     }
   }
 
+  // --- TEXTFIELD BUILDER ---
   Widget _buildTextField({
     required String label,
     required TextEditingController controller,
@@ -191,6 +191,7 @@ class _GeneralInfoScreenState extends State<GeneralInfoScreen> {
     );
   }
 
+  // --- MAIN FORM ---
   Widget _buildForm() {
     return Form(
       key: _formKey,
@@ -204,14 +205,41 @@ class _GeneralInfoScreenState extends State<GeneralInfoScreen> {
             ],
           ),
           const SizedBox(height: 20),
-          _buildTextField(label: "Full Name", controller: _nameController, icon: Icons.person_outline),
+
+          _buildTextField(label: "Full Name", controller: _nameController, icon: Icons.person_outline,
+              validator: (value) {
+                if (value == null || value.isEmpty) return 'Please enter Full Name';
+                if (value.length < 4) return 'Name must be at least 4 letters';
+                if (value.length > 20) return 'Name must not exceed 20 letters';
+                return null;
+              }
+          ),
           const SizedBox(height: 16),
-          _buildTextField(label: "Email", controller: _emailController, keyboardType: TextInputType.emailAddress, icon: Icons.email_outlined, errorText: _emailError),
+          _buildTextField(label: "Email", controller: _emailController, keyboardType: TextInputType.emailAddress, icon: Icons.email_outlined, errorText: _emailError,
+              validator: (value) {
+                if (value == null || value.isEmpty) return 'Please enter Email';
+                if (!RegExp(r'^[a-zA-Z0-9._%+-]+@gmail\.com$').hasMatch(value)) return 'Email must be: example@gmail.com';
+                return null;
+              }
+          ),
           const SizedBox(height: 16),
-          _buildTextField(label: "Phone Number", controller: _phoneController, keyboardType: TextInputType.phone, icon: Icons.phone_outlined, errorText: _phoneError),
+          _buildTextField(label: "Phone Number", controller: _phoneController, keyboardType: TextInputType.phone, icon: Icons.phone_outlined, errorText: _phoneError,
+              validator: (value) {
+                if (value == null || value.isEmpty) return 'Please enter Phone Number';
+                if (!RegExp(r'^03\d{9}$').hasMatch(value)) return 'Enter valid 11-digit number starting with 03';
+                return null;
+              }
+          ),
           const SizedBox(height: 16),
-          _buildTextField(label: "Password", controller: _passwordController, icon: Icons.lock_outline),
+          _buildTextField(label: "Password", controller: _passwordController, icon: Icons.lock_outline,
+              validator: (value) {
+                if (value == null || value.isEmpty) return 'Please enter Password';
+                if (value.length < 6) return 'Password must be at least 6 characters';
+                return null;
+              }
+          ),
           const SizedBox(height: 16),
+
           Row(
             children: [
               const Icon(Icons.wc, color: lightSeaGreen),
@@ -225,10 +253,12 @@ class _GeneralInfoScreenState extends State<GeneralInfoScreen> {
               ),
             ],
           ),
+
           if (_isWorker!) ...[
             const SizedBox(height: 16),
             Row(children: [const Icon(Icons.work_outline, color: lightSeaGreen), const SizedBox(width: 12), const Text("Profession: ", style: TextStyle(fontSize: 16)), const SizedBox(width: 10), DropdownButton<String>(value: _selectedProfession, items: professions.map((p) => DropdownMenuItem(value: p, child: Text(p))).toList(), onChanged: (value) => setState(() => _selectedProfession = value!))]),
             const SizedBox(height: 16),
+
             Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
               const Text("Skills:"), const SizedBox(height: 8),
               Container(
@@ -241,6 +271,7 @@ class _GeneralInfoScreenState extends State<GeneralInfoScreen> {
               )
             ]),
             const SizedBox(height: 16),
+
             _buildTextField(label: "Experience", controller: _experienceController, icon: Icons.timeline_outlined),
             const SizedBox(height: 16),
             Row(children: [
@@ -249,11 +280,15 @@ class _GeneralInfoScreenState extends State<GeneralInfoScreen> {
               Expanded(child: DropdownButton<String>(hint: const Text("End"), value: _endTime, items: ['5 PM','6 PM','7 PM','8 PM'].map((t)=>DropdownMenuItem(value: t, child: Text(t))).toList(), onChanged: (v)=>setState(()=>_endTime=v))),
             ]),
           ],
+
           const SizedBox(height: 16),
           _buildTextField(label: "Address", controller: _addressController, icon: Icons.location_on_outlined),
           const SizedBox(height: 16),
           _buildTextField(label: "City", controller: _cityController, icon: Icons.location_city),
+
           const SizedBox(height: 20),
+
+          // --- SMART GPS LOCATION BUTTON ---
           Container(
             margin: const EdgeInsets.only(bottom: 0),
             child: OutlinedButton.icon(
@@ -272,22 +307,44 @@ class _GeneralInfoScreenState extends State<GeneralInfoScreen> {
               onPressed: () async {
                 FocusScope.of(context).unfocus();
                 setState(() => _isLocating = true);
+
                 LatLng? startPos;
+
                 try {
                   bool serviceEnabled = await Geolocator.isLocationServiceEnabled();
                   if (!serviceEnabled) { await Geolocator.openLocationSettings(); }
+
                   LocationPermission permission = await Geolocator.checkPermission();
                   if (permission == LocationPermission.denied) { permission = await Geolocator.requestPermission(); }
+
                   if (permission != LocationPermission.denied && permission != LocationPermission.deniedForever) {
                     Position position = await Geolocator.getCurrentPosition(desiredAccuracy: LocationAccuracy.high);
                     startPos = LatLng(position.latitude, position.longitude);
                   }
                 } catch (e) { debugPrint("GPS Failed: $e"); }
+
+                if (startPos == null) {
+                  String address = _addressController.text.trim();
+                  String city = _cityController.text.trim();
+                  if (city.isNotEmpty) {
+                    try {
+                      List<Location> locs = await locationFromAddress("$address, $city, Pakistan");
+                      if (locs.isNotEmpty) startPos = LatLng(locs.first.latitude, locs.first.longitude);
+                      else {
+                        List<Location> cityLocs = await locationFromAddress("$city, Pakistan");
+                        if (cityLocs.isNotEmpty) startPos = LatLng(cityLocs.first.latitude, cityLocs.first.longitude);
+                      }
+                    } catch (_) {}
+                  }
+                }
+
                 setState(() => _isLocating = false);
+
                 final result = await Navigator.push(
                   context,
                   MaterialPageRoute(builder: (context) => LocationPickerScreen(startLocation: startPos)),
                 );
+
                 if (result != null && result is LatLng) {
                   setState(() { _latitude = result.latitude; _longitude = result.longitude; });
                   ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("Location Saved!")));
@@ -295,6 +352,8 @@ class _GeneralInfoScreenState extends State<GeneralInfoScreen> {
               },
             ),
           ),
+          // ---------------------------------
+
           if (_isWorker!) ...[
             const SizedBox(height: 16),
             SwitchListTile(
@@ -306,6 +365,7 @@ class _GeneralInfoScreenState extends State<GeneralInfoScreen> {
             ),
             _buildTextField(label: "Bio", controller: _bioController, icon: Icons.info_outline, maxLines: 3),
           ],
+
           const SizedBox(height: 30),
           ElevatedButton.icon(
             icon: const Icon(Icons.arrow_forward_ios, color: Colors.white),
@@ -318,6 +378,7 @@ class _GeneralInfoScreenState extends State<GeneralInfoScreen> {
     );
   }
 
+  // --- ACCOUNT TYPE SELECTION ---
   Widget _buildAccountTypeSelection() {
     return Column(
       children: [
@@ -344,6 +405,7 @@ class _GeneralInfoScreenState extends State<GeneralInfoScreen> {
     );
   }
 
+  // --- BUILD METHOD FIX ---
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -351,6 +413,7 @@ class _GeneralInfoScreenState extends State<GeneralInfoScreen> {
       body: SafeArea(
         child: Column(
           children: [
+            // Back Button at top left (Outside Scroll)
             Align(
               alignment: Alignment.topLeft,
               child: IconButton(
@@ -358,9 +421,11 @@ class _GeneralInfoScreenState extends State<GeneralInfoScreen> {
                 onPressed: () => Navigator.pop(context),
               ),
             ),
+
+            // Expanded allows content to take full height
             Expanded(
-              child: Center(
-                child: SingleChildScrollView(
+              child: Center( // Centers vertically if content is short
+                child: SingleChildScrollView( // Allows scroll if content is long
                   child: Container(
                     margin: const EdgeInsets.symmetric(horizontal: 20),
                     padding: const EdgeInsets.all(24),
