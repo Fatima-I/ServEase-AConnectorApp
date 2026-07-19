@@ -33,13 +33,27 @@ class _WorkerChatScreenState extends State<WorkerChatScreen> {
 
   String? _currentChatId;
   String _myRealName = "User";
-  final int _selectedIndex = 1;
+  Map<String, dynamic>? _fullWorkerData;
 
   @override
   void initState() {
     super.initState();
     _currentChatId = widget.chatId;
     _fetchMyNameAndSetup();
+    _fetchWorkerFullData();
+  }
+
+  Future<void> _fetchWorkerFullData() async {
+    try {
+      DocumentSnapshot doc = await _firestore.collection('users').doc(widget.otherUserUid).get();
+      if (doc.exists && mounted) {
+        setState(() {
+          _fullWorkerData = doc.data() as Map<String, dynamic>;
+        });
+      }
+    } catch (e) {
+      debugPrint("Error fetching worker profile: $e");
+    }
   }
 
   Future<void> _fetchMyNameAndSetup() async {
@@ -71,7 +85,6 @@ class _WorkerChatScreenState extends State<WorkerChatScreen> {
     _messageController.clear();
 
     final myUid = _auth.currentUser!.uid;
-
     final chatRef = _firestore.collection('chats').doc(_currentChatId);
 
     await chatRef.collection('messages').add({
@@ -91,15 +104,28 @@ class _WorkerChatScreenState extends State<WorkerChatScreen> {
     }, SetOptions(merge: true));
   }
 
-  // --- OPEN PROFILE ON CLICK ---
   void _openProfile() {
+    String nameToPass = widget.otherUserName;
+    String professionToPass = widget.profession ?? "Worker";
+
+    if (_fullWorkerData != null) {
+      nameToPass = _fullWorkerData!['name'] ?? nameToPass;
+      if (_fullWorkerData!.containsKey('workerDetails')) {
+        professionToPass = _fullWorkerData!['workerDetails']['profession'] ?? professionToPass;
+      }
+    }
+
     Navigator.push(
       context,
       MaterialPageRoute(
         builder: (_) => WorkerProfileScreen(
           workerUid: widget.otherUserUid,
-          name: widget.otherUserName,
-          profession: widget.profession ?? "Worker",
+          name: nameToPass,
+          profession: professionToPass,
+          rating: "0.0",
+          reviews: "0",
+          distance: "0.0",
+          fromChat: true,
         ),
       ),
     );
@@ -112,7 +138,6 @@ class _WorkerChatScreenState extends State<WorkerChatScreen> {
     return Scaffold(
       appBar: AppBar(
         backgroundColor: lightSeaGreen,
-        // CLICKABLE TITLE
         title: InkWell(
           onTap: _openProfile,
           child: Row(
@@ -197,35 +222,7 @@ class _WorkerChatScreenState extends State<WorkerChatScreen> {
           ),
         ],
       ),
-      bottomNavigationBar: widget.showNav ? BottomNavigationBar(
-        currentIndex: _selectedIndex,
-        selectedItemColor: lightSeaGreen,
-        unselectedItemColor: Colors.grey,
-        onTap: (index) {
-          if (index == 0) {
-            _openProfile();
-          } else if (index == 2) {
-            Navigator.pushReplacement(
-              context,
-              MaterialPageRoute(
-                builder: (_) => WorkerReviewsScreen(
-                  workerUid: widget.otherUserUid,
-                  name: widget.otherUserName,
-                  profession: widget.profession ?? "Worker",
-                  rating: "4.5",
-                  reviews: "0",
-                  distance: "N/A",
-                ),
-              ),
-            );
-          }
-        },
-        items: const [
-          BottomNavigationBarItem(icon: Icon(Icons.person), label: "Profile"),
-          BottomNavigationBarItem(icon: Icon(Icons.chat_bubble_outline), label: "Chat"),
-          BottomNavigationBarItem(icon: Icon(Icons.reviews_outlined), label: "Reviews"),
-        ],
-      ) : null,
+      // *** REMOVED BOTTOM NAV AS REQUESTED ***
     );
   }
 }

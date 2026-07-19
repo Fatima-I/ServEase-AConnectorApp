@@ -15,27 +15,20 @@ class WorkerViewScreen extends StatelessWidget {
         title: const Text("My Reviews"),
         backgroundColor: lightSeaGreen,
         elevation: 0,
-        leading: IconButton(
-          icon: const Icon(Icons.arrow_back, color: Colors.white),
-          onPressed: () => Navigator.pop(context),
-        ),
       ),
       body: StreamBuilder<QuerySnapshot>(
-        // Fetch reviews for CURRENT LOGGED IN USER (Worker)
-        stream: FirebaseFirestore.instance.collection('users').doc(uid).collection('reviews').orderBy('timestamp', descending: true).snapshots(),
+        stream: FirebaseFirestore.instance
+            .collection('users')
+            .doc(uid)
+            .collection('reviews')
+            .orderBy('timestamp', descending: true)
+            .snapshots(),
         builder: (context, snapshot) {
-          if (snapshot.connectionState == ConnectionState.waiting) return const Center(child: CircularProgressIndicator());
+          if (snapshot.connectionState == ConnectionState.waiting) {
+            return const Center(child: CircularProgressIndicator());
+          }
           if (!snapshot.hasData || snapshot.data!.docs.isEmpty) {
-            return const Center(
-              child: Column(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  Icon(Icons.star_border, size: 60, color: Colors.grey),
-                  SizedBox(height: 10),
-                  Text("No reviews yet", style: TextStyle(color: Colors.grey)),
-                ],
-              ),
-            );
+            return const Center(child: Text("No reviews yet."));
           }
 
           return ListView.builder(
@@ -49,11 +42,13 @@ class WorkerViewScreen extends StatelessWidget {
               return FutureBuilder<DocumentSnapshot>(
                 future: FirebaseFirestore.instance.collection('users').doc(reviewerId).get(),
                 builder: (context, userSnapshot) {
-                  String realName = "User";
+                  String realName = "User"; // Default fallback
+
                   if (userSnapshot.hasData && userSnapshot.data!.exists) {
                     realName = userSnapshot.data!['name'] ?? "User";
-                  } else {
-                    realName = data['reviewerName'] ?? "User";
+                  } else if (data.containsKey('reviewerName')) {
+                    // Use stored name if fetch fails (or while loading)
+                    realName = data['reviewerName'];
                   }
 
                   return Card(
@@ -63,7 +58,7 @@ class WorkerViewScreen extends StatelessWidget {
                     child: ListTile(
                       leading: CircleAvatar(
                         backgroundColor: lightSeaGreen.withOpacity(0.1),
-                        child: Text(realName.isNotEmpty ? realName[0].toUpperCase() : 'U', style: const TextStyle(color: lightSeaGreen, fontWeight: FontWeight.bold)),
+                        child: const Icon(Icons.person, color: lightSeaGreen),
                       ),
                       title: Row(
                         children: [
@@ -75,7 +70,7 @@ class WorkerViewScreen extends StatelessWidget {
                       ),
                       subtitle: Padding(
                         padding: const EdgeInsets.only(top: 4.0),
-                        child: Text(data['text'] ?? "", style: const TextStyle(color: Colors.black87)),
+                        child: Text(data['text'], style: const TextStyle(color: Colors.black87)),
                       ),
                     ),
                   );

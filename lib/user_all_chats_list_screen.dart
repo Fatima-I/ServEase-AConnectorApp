@@ -4,7 +4,18 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'user_worker_chat_screen.dart';
 
 class UserChatListScreen extends StatelessWidget {
-  const UserChatListScreen({super.key});
+  final bool isWorker;
+
+  const UserChatListScreen({super.key, this.isWorker = false});
+
+  String _formatTime(Timestamp? timestamp) {
+    if (timestamp == null) return '';
+    DateTime date = timestamp.toDate();
+    String hour = date.hour > 12 ? (date.hour - 12).toString() : (date.hour == 0 ? '12' : date.hour.toString());
+    String minute = date.minute.toString().padLeft(2, '0');
+    String period = date.hour >= 12 ? 'PM' : 'AM';
+    return "$hour:$minute $period";
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -15,9 +26,10 @@ class UserChatListScreen extends StatelessWidget {
 
     return Scaffold(
       appBar: AppBar(
-        title: const Text("Chats", style: TextStyle(color: Colors.white)),
+        title: const Text("Chats", style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
         backgroundColor: lightSeaGreen,
-        leading: IconButton(icon: const Icon(Icons.arrow_back, color: Colors.white), onPressed: () => Navigator.pop(context)),
+        automaticallyImplyLeading: false,
+        elevation: 1,
       ),
       body: StreamBuilder<QuerySnapshot>(
         stream: FirebaseFirestore.instance.collection('chats').where('participants', arrayContains: myUid).snapshots(),
@@ -27,7 +39,7 @@ class UserChatListScreen extends StatelessWidget {
 
           return ListView.builder(
             itemCount: snapshot.data!.docs.length,
-            padding: const EdgeInsets.all(8),
+            padding: const EdgeInsets.symmetric(vertical: 4),
             itemBuilder: (context, index) {
               final chatDoc = snapshot.data!.docs[index];
               final data = chatDoc.data() as Map<String, dynamic>;
@@ -44,7 +56,7 @@ class UserChatListScreen extends StatelessWidget {
 
                   if (userSnapshot.hasData && userSnapshot.data!.exists) {
                     final userData = userSnapshot.data!.data() as Map<String, dynamic>;
-                    displayName = userData['name'] ?? 'Unknown User';
+                    displayName = userData['name'] ?? 'User';
                     if (userData.containsKey('workerDetails')) {
                       profession = userData['workerDetails']['profession'];
                     }
@@ -53,28 +65,55 @@ class UserChatListScreen extends StatelessWidget {
                     displayName = names[otherUid] ?? 'User';
                   }
 
-                  return Card(
-                    elevation: 3,
-                    margin: const EdgeInsets.symmetric(vertical: 8, horizontal: 4),
-                    child: ListTile(
-                      leading: CircleAvatar(backgroundColor: lightSeaGreen, child: const Icon(Icons.person, color: Colors.white)),
-                      title: Text(displayName, style: const TextStyle(fontWeight: FontWeight.bold)),
-                      subtitle: Text(data['lastMessage'] ?? '', maxLines: 1, overflow: TextOverflow.ellipsis),
-                      onTap: () {
-                        Navigator.push(
-                          context,
-                          MaterialPageRoute(
-                            builder: (context) => WorkerChatScreen(
-                              chatId: chatDoc.id,
-                              otherUserUid: otherUid,
-                              otherUserName: displayName,
-                              profession: profession,
-                              showNav: false, // Hides bottom bar
-                            ),
+                  return Column(
+                    children: [
+                      ListTile(
+                        contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+                        leading: CircleAvatar(
+                          radius: 28,
+                          backgroundColor: lightSeaGreen.withOpacity(0.15),
+                          child: const Icon(Icons.person, color: lightSeaGreen, size: 30),
+                        ),
+                        title: Text(
+                          displayName,
+                          style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 17),
+                        ),
+                        subtitle: Padding(
+                          padding: const EdgeInsets.only(top: 4),
+                          child: Text(
+                            data['lastMessage'] ?? '',
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: TextStyle(color: Colors.grey[600], fontSize: 14),
                           ),
-                        );
-                      },
-                    ),
+                        ),
+                        trailing: Column(
+                          mainAxisAlignment: MainAxisAlignment.center,
+                          crossAxisAlignment: CrossAxisAlignment.end,
+                          children: [
+                            Text(_formatTime(data['lastMessageTime']), style: const TextStyle(color: Colors.grey, fontSize: 12)),
+                            const SizedBox(height: 6),
+                            // Mock unread indicator for professional look
+                            const Icon(Icons.done_all, color: Colors.blue, size: 16),
+                          ],
+                        ),
+                        onTap: () {
+                          // USE rootNavigator to hide the Dashboard bar
+                          Navigator.of(context, rootNavigator: true).push(
+                            MaterialPageRoute(
+                              builder: (context) => WorkerChatScreen(
+                                chatId: chatDoc.id,
+                                otherUserUid: otherUid,
+                                otherUserName: displayName,
+                                profession: profession,
+                                showNav: false, // Internal nav hidden
+                              ),
+                            ),
+                          );
+                        },
+                      ),
+                      const Divider(height: 1, indent: 80, endIndent: 16),
+                    ],
                   );
                 },
               );

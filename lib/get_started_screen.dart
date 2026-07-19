@@ -1,9 +1,12 @@
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
-import 'package:cloud_firestore/cloud_firestore.dart'; // Needed for role check
+import 'package:cloud_firestore/cloud_firestore.dart';
 import 'marketplace_screen.dart';
 import 'forgot_password_screen.dart';
 import 'general_info_screen.dart';
+import 'user_dashboard_screen.dart';
+import 'worker_dashboard_screen.dart';
+import 'admin_dashboard_screen.dart'; // NEW IMPORT
 
 class GetStartedScreen extends StatefulWidget {
   const GetStartedScreen({super.key});
@@ -68,21 +71,57 @@ class _GetStartedScreenState extends State<GetStartedScreen> {
             .get();
 
         if (userDoc.exists) {
-          String role = userDoc.get('role') ?? 'user';
-          bool isWorker = role == 'worker';
+          Map<String, dynamic> data = userDoc.data() as Map<String, dynamic>;
+          String role = data['role'] ?? 'user';
+          bool isApproved = data['isApproved'] ?? true; // Default true
+
+          // --- ADMIN CHECK ---
+          if (role == 'admin') {
+            if (mounted) {
+              Navigator.pushReplacement(
+                context,
+                MaterialPageRoute(builder: (context) => const AdminDashboardScreen()),
+              );
+            }
+            return;
+          }
+
+          // --- WORKER APPROVAL CHECK ---
+          if (role == 'worker' && !isApproved) {
+            await FirebaseAuth.instance.signOut();
+            if (mounted) {
+              ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(
+                    content: Text("Account Pending: Waiting for Admin Approval."),
+                    backgroundColor: Colors.orange,
+                    duration: Duration(seconds: 4),
+                  )
+              );
+              setState(() => _isLoading = false);
+            }
+            return;
+          }
 
           // 3. Navigate with correct role
+          bool isWorker = role == 'worker';
           if (mounted) {
-            Navigator.pushReplacement(
-              context,
-              MaterialPageRoute(
-                // Pass the actual role here!
-                builder: (context) => WorkerFeedScreen(isWorker: isWorker),
-              ),
-            );
+            if (isWorker) {
+              Navigator.pushReplacement(
+                context,
+                MaterialPageRoute(
+                  builder: (context) => const WorkerDashboardScreen(),
+                ),
+              );
+            } else {
+              Navigator.pushReplacement(
+                context,
+                MaterialPageRoute(
+                  builder: (context) => const UserDashboardScreen(),
+                ),
+              );
+            }
           }
         } else {
-          // Handle missing user document
           setState(() {
             _emailError = "User data not found in database.";
           });

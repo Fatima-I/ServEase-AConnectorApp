@@ -1,12 +1,11 @@
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
-import 'user_all_chats_list_screen.dart';
+import 'package:geolocator/geolocator.dart';
+import 'package:latlong2/latlong.dart';
 import 'edit_profile_screen.dart';
 import 'about_screen.dart';
 import 'worker_profile.dart';
-import 'worker_reviews_screen.dart';
-import 'worker_view_review.dart';
 
 class WorkerFeedScreen extends StatefulWidget {
   final bool isWorker;
@@ -29,17 +28,61 @@ class _WorkerFeedScreenState extends State<WorkerFeedScreen> {
 
   // Filter values
   double _selectedRating = 0.0;
-  double _selectedDistance = 10.0;
+  double _selectedDistance = 50.0; // Increased default range
 
   final List<String> _categories = [
     'All', 'Plumber', 'Electrician', 'Tutor', 'Tailor',
     'Painter', 'Cleaner', 'Carpenter', 'Others'
   ];
 
+  Position? _currentUserPosition;
+  bool _gettingLocation = true;
+
+  @override
+  void initState() {
+    super.initState();
+    _getUserLocation();
+  }
+
   @override
   void dispose() {
     _searchController.dispose();
     super.dispose();
+  }
+
+  Future<void> _getUserLocation() async {
+    try {
+      bool serviceEnabled = await Geolocator.isLocationServiceEnabled();
+      if (!serviceEnabled) {
+        setState(() => _gettingLocation = false);
+        return;
+      }
+
+      LocationPermission permission = await Geolocator.checkPermission();
+      if (permission == LocationPermission.denied) {
+        permission = await Geolocator.requestPermission();
+        if (permission == LocationPermission.denied) {
+          setState(() => _gettingLocation = false);
+          return;
+        }
+      }
+
+      if (permission == LocationPermission.deniedForever) {
+        setState(() => _gettingLocation = false);
+        return;
+      }
+
+      Position position = await Geolocator.getCurrentPosition();
+      if (mounted) {
+        setState(() {
+          _currentUserPosition = position;
+          _gettingLocation = false;
+        });
+      }
+    } catch (e) {
+      debugPrint("Error getting location: $e");
+      if (mounted) setState(() => _gettingLocation = false);
+    }
   }
 
   void _handleLogout() {
@@ -72,6 +115,9 @@ class _WorkerFeedScreenState extends State<WorkerFeedScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final currentUid = FirebaseAuth.instance.currentUser?.uid;
+    final Distance distanceCalculator = const Distance();
+
     return Scaffold(
       key: _scaffoldKey,
       backgroundColor: bgColor,
@@ -79,7 +125,6 @@ class _WorkerFeedScreenState extends State<WorkerFeedScreen> {
       body: SafeArea(
         child: Column(
           children: [
-            // Header
             Container(
               color: Colors.white,
               padding: const EdgeInsets.all(12),
@@ -104,17 +149,12 @@ class _WorkerFeedScreenState extends State<WorkerFeedScreen> {
               ),
             ),
 
-            // Search Bar
             Container(
               color: Colors.white,
               padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
               child: TextField(
                 controller: _searchController,
-                onChanged: (value) {
-                  setState(() {
-                    _searchQuery = value;
-                  });
-                },
+                onChanged: (value) => setState(() => _searchQuery = value),
                 decoration: InputDecoration(
                   hintText: 'Search by name or profession...',
                   prefixIcon: const Icon(Icons.search, color: lightSeaGreen),
@@ -123,24 +163,18 @@ class _WorkerFeedScreenState extends State<WorkerFeedScreen> {
                     icon: const Icon(Icons.clear, color: Colors.grey),
                     onPressed: () {
                       _searchController.clear();
-                      setState(() {
-                        _searchQuery = '';
-                      });
+                      setState(() => _searchQuery = '');
                     },
                   )
                       : null,
                   filled: true,
                   fillColor: bgColor,
-                  border: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(12),
-                    borderSide: BorderSide.none,
-                  ),
+                  border: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide.none),
                   contentPadding: const EdgeInsets.symmetric(vertical: 12),
                 ),
               ),
             ),
 
-            // Category Tabs
             Container(
               color: Colors.white,
               height: 50,
@@ -177,7 +211,6 @@ class _WorkerFeedScreenState extends State<WorkerFeedScreen> {
 
             const Divider(height: 1),
 
-            // Worker List (Connected to Firebase)
             Expanded(
               child: StreamBuilder<QuerySnapshot>(
                   stream: FirebaseFirestore.instance
@@ -193,33 +226,46 @@ class _WorkerFeedScreenState extends State<WorkerFeedScreen> {
                       return _buildNoDataView();
                     }
 
-                    // CLIENT SIDE FILTERING (To match your old logic)
                     final filteredWorkers = snapshot.data!.docs.where((doc) {
+                      if (doc.id == currentUid) return false;
+
                       final data = doc.data() as Map<String, dynamic>;
                       final workerDetails = data['workerDetails'] ?? {};
 
                       String name = (data['name'] ?? '').toString();
                       String profession = (workerDetails['profession'] ?? '').toString();
                       double rating = (workerDetails['rating'] ?? 0.0).toDouble();
-                      // Mock distance since we don't have GPS yet
-                      double distance = 5.0;
 
-                      final matchesCategory = _selectedCategory == 'All' ||
-                          profession == _selectedCategory;
+                      double distance = 0.0;
 
+                      if (_currentUserPosition != null &&
+                          workerDetails['latitude'] != null &&
+                          workerDetails['longitude'] != null) {
+
+                        double wLat = double.tryParse(workerDetails['latitude'].toString()) ?? 0.0;
+                        double wLng = double.tryParse(workerDetails['longitude'].toString()) ?? 0.0;
+
+                        double meters = distanceCalculator.as(
+                            LengthUnit.Meter,
+                            LatLng(_currentUserPosition!.latitude, _currentUserPosition!.longitude),
+                            LatLng(wLat, wLng)
+                        );
+                        distance = meters / 1000;
+                      } else {
+                        distance = 0.0;
+                      }
+
+                      final matchesCategory = _selectedCategory == 'All' || profession == _selectedCategory;
                       final matchesSearch = _searchQuery.isEmpty ||
-                          profession.toLowerCase().contains(_searchQuery.toLowerCase()) ||
-                          name.toLowerCase().contains(_searchQuery.toLowerCase());
-
+                          name.toLowerCase().contains(_searchQuery.toLowerCase()) ||
+                          profession.toLowerCase().contains(_searchQuery.toLowerCase());
                       final matchesRating = rating >= _selectedRating;
                       final matchesDistance = distance <= _selectedDistance;
 
                       return matchesCategory && matchesSearch && matchesRating && matchesDistance;
                     }).toList();
 
-                    if (filteredWorkers.isEmpty) {
-                      return _buildNoDataView();
-                    }
+                    if (filteredWorkers.isEmpty) return _buildNoDataView();
 
                     return ListView.builder(
                       padding: const EdgeInsets.all(16),
@@ -233,85 +279,86 @@ class _WorkerFeedScreenState extends State<WorkerFeedScreen> {
                         String profession = workerDetails['profession'] ?? 'Worker';
                         String rating = (workerDetails['rating'] ?? 0.0).toStringAsFixed(1);
                         String reviews = (workerDetails['reviewCount'] ?? 0).toString();
-                        String distance = "5.0"; // Fixed for now
+
+                        String distanceText = "Unknown";
+                        String distanceValue = "0.0";
+
+                        if (_currentUserPosition != null &&
+                            workerDetails['latitude'] != null &&
+                            workerDetails['longitude'] != null) {
+
+                          double wLat = double.tryParse(workerDetails['latitude'].toString()) ?? 0.0;
+                          double wLng = double.tryParse(workerDetails['longitude'].toString()) ?? 0.0;
+
+                          double meters = distanceCalculator.as(
+                              LengthUnit.Meter,
+                              LatLng(_currentUserPosition!.latitude, _currentUserPosition!.longitude),
+                              LatLng(wLat, wLng)
+                          );
+                          double km = meters / 1000;
+                          distanceText = "${km.toStringAsFixed(1)} km";
+                          distanceValue = km.toStringAsFixed(1);
+                        } else if (_gettingLocation) {
+                          distanceText = "Calculating...";
+                        }
 
                         return Card(
                           margin: const EdgeInsets.only(bottom: 16),
                           elevation: 3,
-                          shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(16),
-                          ),
-                          child: ListTile(
-                            contentPadding: const EdgeInsets.all(16),
-                            leading: Container(
-                              width: 70,
-                              height: 70,
-                              decoration: BoxDecoration(
-                                color: lightSeaGreen.withOpacity(0.2),
-                                borderRadius: BorderRadius.circular(12),
+                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+                          child: Padding(
+                            padding: const EdgeInsets.symmetric(vertical: 8.0),
+                            child: ListTile(
+                              contentPadding: const EdgeInsets.symmetric(horizontal: 16),
+                              leading: Container(
+                                width: 60, height: 60,
+                                decoration: BoxDecoration(color: lightSeaGreen.withOpacity(0.2), borderRadius: BorderRadius.circular(12)),
+                                child: const Icon(Icons.person, size: 35, color: lightSeaGreen),
                               ),
-                              child: const Icon(Icons.person, size: 35, color: lightSeaGreen),
-                            ),
-                            title: Text(
-                              name,
-                              style: const TextStyle(
-                                fontSize: 18,
-                                fontWeight: FontWeight.bold,
-                              ),
-                            ),
-                            subtitle: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                Text(
-                                  profession,
-                                  style: TextStyle(fontSize: 14, color: Colors.grey[600]),
-                                ),
-                                const SizedBox(height: 6),
-                                Row(
-                                  children: [
-                                    const Icon(Icons.star, color: Colors.amber, size: 16),
-                                    const SizedBox(width: 4),
-                                    Text(
-                                      '$rating ($reviews)',
-                                      style: const TextStyle(fontSize: 13),
-                                    ),
-                                    const SizedBox(width: 12),
-                                    Icon(Icons.location_on, size: 16, color: Colors.grey[600]),
-                                    const SizedBox(width: 4),
-                                    Text(
-                                      '$distance km',
-                                      style: TextStyle(fontSize: 13, color: Colors.grey[600]),
-                                    ),
-                                  ],
-                                ),
-                              ],
-                            ),
-                            trailing: ElevatedButton(
-                              style: ElevatedButton.styleFrom(
-                                backgroundColor: lightSeaGreen,
-                                shape: RoundedRectangleBorder(
-                                  borderRadius: BorderRadius.circular(10),
-                                ),
-                              ),
-                              onPressed: () {
-                                // Navigating with REAL UID
-                                Navigator.push(
-                                  context,
-                                  MaterialPageRoute(
-                                    builder: (context) => WorkerProfileScreen(
-                                      workerUid: doc.id,
-                                      name: name,
-                                      profession: profession,
-                                      rating: rating,
-                                      reviews: reviews,
-                                      distance: distance,
+                              title: Text(name, style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold), overflow: TextOverflow.ellipsis),
+                              subtitle: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Text(profession, style: TextStyle(fontSize: 14, color: Colors.grey[600]), overflow: TextOverflow.ellipsis),
+                                  const SizedBox(height: 6),
+                                  // Wrapped in SingleChildScrollView to prevent overflow
+                                  SingleChildScrollView(
+                                    scrollDirection: Axis.horizontal,
+                                    child: Row(
+                                      children: [
+                                        const Icon(Icons.star, color: Colors.amber, size: 16),
+                                        const SizedBox(width: 4),
+                                        Text('$rating ($reviews)', style: const TextStyle(fontSize: 13)),
+                                        const SizedBox(width: 12),
+                                        Icon(Icons.location_on, size: 16, color: Colors.grey[600]),
+                                        const SizedBox(width: 4),
+                                        Text(distanceText, style: TextStyle(fontSize: 13, color: Colors.grey[600])),
+                                      ],
                                     ),
                                   ),
-                                );
-                              },
-                              child: const Text(
-                                'View',
-                                style: TextStyle(color: Colors.white),
+                                ],
+                              ),
+                              trailing: ElevatedButton(
+                                style: ElevatedButton.styleFrom(
+                                  backgroundColor: lightSeaGreen,
+                                  padding: const EdgeInsets.symmetric(horizontal: 12),
+                                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                                ),
+                                onPressed: () {
+                                  Navigator.of(context, rootNavigator: true).push(
+                                    MaterialPageRoute(
+                                      builder: (context) => WorkerProfileScreen(
+                                        workerUid: doc.id,
+                                        name: name,
+                                        profession: profession,
+                                        rating: rating,
+                                        reviews: reviews,
+                                        distance: distanceValue,
+                                      ),
+                                    ),
+                                  );
+                                },
+                                child: const Text('View', style: TextStyle(color: Colors.white, fontSize: 13)),
                               ),
                             ),
                           ),
@@ -355,7 +402,6 @@ class _WorkerFeedScreenState extends State<WorkerFeedScreen> {
     );
   }
 
-  // Filters bottom sheet
   void _showFilters() {
     showModalBottomSheet(
       context: context,
@@ -383,7 +429,7 @@ class _WorkerFeedScreenState extends State<WorkerFeedScreen> {
                     onPressed: () {
                       setModalState(() {
                         _selectedRating = 0.0;
-                        _selectedDistance = 10.0;
+                        _selectedDistance = 50.0;
                       });
                     },
                     child: const Text(
@@ -400,7 +446,7 @@ class _WorkerFeedScreenState extends State<WorkerFeedScreen> {
                 value: _selectedRating,
                 min: 0.0,
                 max: 5.0,
-                divisions: 10,
+                divisions: 5,
                 activeColor: lightSeaGreen,
                 label: _selectedRating == 0.0
                     ? 'Any'
@@ -415,8 +461,8 @@ class _WorkerFeedScreenState extends State<WorkerFeedScreen> {
               Slider(
                 value: _selectedDistance,
                 min: 1.0,
-                max: 10.0,
-                divisions: 9,
+                max: 100.0,
+                divisions: 20,
                 activeColor: lightSeaGreen,
                 label: '${_selectedDistance.toStringAsFixed(0)} km',
                 onChanged: (value) {
@@ -451,7 +497,6 @@ class _WorkerFeedScreenState extends State<WorkerFeedScreen> {
     );
   }
 
-  // Drawer
   Widget _buildDrawer() {
     final user = FirebaseAuth.instance.currentUser;
     final email = user?.email ?? 'Guest';
@@ -505,30 +550,13 @@ class _WorkerFeedScreenState extends State<WorkerFeedScreen> {
                 'My Profile',
                 onTap: () {
                   Navigator.pop(context);
-                  Navigator.push(
-                    context,
+                  Navigator.of(context, rootNavigator: true).push(
                     MaterialPageRoute(
                       builder: (context) => WorkerProfileScreen(
                         workerUid: user!.uid,
                         name: 'Me',
                         profession: 'Worker',
-                        rating: '0',
-                        reviews: '0',
-                        distance: '0',
                       ),
-                    ),
-                  );
-                },
-              ),
-              _drawerItem(
-                Icons.star_rate,
-                'My Reviews',
-                onTap: () {
-                  Navigator.pop(context);
-                  Navigator.push(
-                    context,
-                    MaterialPageRoute(
-                      builder: (context) => const WorkerViewScreen(),
                     ),
                   );
                 },
@@ -547,15 +575,6 @@ class _WorkerFeedScreenState extends State<WorkerFeedScreen> {
               },
             ),
 
-            _drawerItem(Icons.chat, 'Chats',
-              onTap: () {
-                Navigator.pop(context);
-                Navigator.push(
-                  context,
-                  MaterialPageRoute(builder: (context) => const UserChatListScreen()),
-                );
-              },
-            ),
             const Divider(),
             _drawerItem(Icons.info_outline, 'About',
               onTap: () {

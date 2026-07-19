@@ -49,7 +49,7 @@ class HomeScreen extends StatelessWidget {
       ),
       body: Column(
         children: [
-          const SizedBox(height: 50), // push logo slightly from top
+          const Spacer(flex: 2), // Top space to push logo down
           // Logo - Centered
           Center(
             child: Image.asset(
@@ -59,7 +59,7 @@ class HomeScreen extends StatelessWidget {
               fit: BoxFit.contain,
             ),
           ),
-          const Spacer(), // push button to bottom
+          const Spacer(flex: 2), // Middle space to push button down
           // Get Started button - Centered and Elevated
           Center(
             child: ElevatedButton(
@@ -86,12 +86,11 @@ class HomeScreen extends StatelessWidget {
                 style: TextStyle(
                   fontSize: 20,
                   fontWeight: FontWeight.bold,
-
                 ),
               ),
             ),
           ),
-          const SizedBox(height: 30), // optional bottom padding
+          const Spacer(flex: 1), // Optional bottom spacing for balance
         ],
       ),
     );
