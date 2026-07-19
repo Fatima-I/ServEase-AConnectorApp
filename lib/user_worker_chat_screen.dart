@@ -163,7 +163,25 @@ class _WorkerChatScreenState extends State<WorkerChatScreen> {
                   .orderBy('timestamp', descending: false)
                   .snapshots(),
               builder: (context, snapshot) {
-                if (!snapshot.hasData) return const Center(child: Text("Start a conversation"));
+                if (snapshot.hasError) {
+                  debugPrint("Messages stream error: ${snapshot.error}");
+                  return Center(
+                    child: Padding(
+                      padding: const EdgeInsets.all(16),
+                      child: Text(
+                        "Couldn't load messages:\n${snapshot.error}",
+                        textAlign: TextAlign.center,
+                        style: const TextStyle(color: Colors.red),
+                      ),
+                    ),
+                  );
+                }
+                if (snapshot.connectionState == ConnectionState.waiting) {
+                  return const Center(child: CircularProgressIndicator());
+                }
+                if (!snapshot.hasData || snapshot.data!.docs.isEmpty) {
+                  return const Center(child: Text("Start a conversation"));
+                }
                 final docs = snapshot.data!.docs;
 
                 return ListView.builder(

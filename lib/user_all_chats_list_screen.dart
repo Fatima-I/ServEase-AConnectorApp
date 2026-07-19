@@ -106,7 +106,6 @@ class UserChatListScreen extends StatelessWidget {
                                 otherUserUid: otherUid,
                                 otherUserName: displayName,
                                 profession: profession,
-                                showNav: false, // Internal nav hidden
                               ),
                             ),
                           );
